@@ -1,0 +1,120 @@
+/* xp.css: the Luna flavor of <mode-toggle> and its machine pane.
+   Everything here is a skin over classes and html[data-mode]; delete this file
+   and the element still works, unstyled. Tokens come from the aadhar.sh design
+   system (colors, bevels, typography), nothing is hardcoded that a token covers.
+
+   The toggle is an XP TOOLBAR toggle pair, the WordPad Bold-button idiom: the
+   checked button stays DEPRESSED (sunken bevel, pressed face), the other is
+   flat until hovered, when it raises. A segmented pill would be the 2020s read
+   of the same control, and the design brief rules that out by name. */
+
+/* ---- the swap ----------------------------------------------------------- */
+html[data-mode="machine"] [data-human-only] { display: none; }
+[data-machine-view][hidden] { display: none; }
+
+/* ---- toolbar toggle pair ------------------------------------------------ */
+.mt {
+  display: inline-flex;
+  gap: 1px;
+  padding: 1px;
+  font: var(--text-ui) / var(--leading-ui) var(--font-ui);
+}
+.mt__btn {
+  font: inherit;
+  color: var(--ink);
+  min-width: 64px;
+  padding: 2px 8px 2px 22px;
+  position: relative;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--xp-transition), border-color var(--xp-transition);
+}
+/* the glyph: a CSS-drawn document for Human, a mono prompt for Machine */
+.mt__btn::before {
+  content: "";
+  position: absolute; left: 6px; top: 50%;
+  width: 10px; height: 12px; margin-top: -6px;
+  box-sizing: border-box;
+  border: 1px solid var(--ink-soft);
+  background: linear-gradient(var(--window), var(--window)) padding-box,
+              repeating-linear-gradient(180deg, transparent 0 2px, var(--ink-faint) 2px 3px) content-box;
+  padding: 2px 1px;
+}
+.mt__btn[data-mode="machine"]::before {
+  content: ">_";
+  width: auto; height: auto; margin-top: -0.6em;
+  border: 0; background: none; padding: 0;
+  font: bold var(--text-micro) / 1 var(--font-mono);
+  color: var(--ink-soft);
+}
+.mt__btn:hover {
+  border-color: var(--highlight) var(--shadow) var(--shadow) var(--highlight);
+  background: var(--grad-face);
+}
+.mt__btn[aria-checked="true"] {
+  border-color: var(--shadow) var(--highlight) var(--highlight) var(--shadow);
+  background: var(--face-light);
+  box-shadow: inset 1px 1px 0 var(--shadow);
+  padding: 3px 7px 1px 23px; /* the face shifts 1px down-right when held */
+}
+.mt__btn[aria-checked="true"]::before { transform: translate(1px, 1px); }
+.mt__btn:active { filter: brightness(0.9); }
+.mt__btn:focus-visible { outline: 1px dotted var(--ink); outline-offset: -4px; }
+
+/* ---- machine pane ------------------------------------------------------- */
+[data-machine-view] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font: var(--text-ui) / var(--leading-ui) var(--font-ui);
+}
+.mv__well {
+  margin: 0;
+  min-height: 12em;
+  max-height: 60vh;
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  background: var(--window);
+  color: var(--ink);
+  font: var(--text-mono) / 1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid;
+  border-color: var(--shadow) var(--highlight) var(--highlight) var(--shadow);
+  box-shadow: var(--bevel-sunken-deep);
+}
+.mv__well:focus-visible { outline: 1px dotted var(--ink); outline-offset: 2px; }
+
+/* the XP status bar: sunken cells on the control face */
+.mv__status {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--face);
+  font-size: var(--text-xs);
+}
+.mv__cell {
+  padding: 1px 6px;
+  border: 1px solid;
+  border-color: var(--shadow) var(--highlight) var(--highlight) var(--shadow);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mv__cell--grow { flex: 1; min-width: 0; }
+.mv__cell--mono { font-family: var(--font-mono); }
+.mv__cell--served { color: var(--go); }
+.mv__cell--local  { color: var(--danger-deep); }
+
+.mv__how { font-size: var(--text-sm); color: var(--ink-soft); }
+.mv__how summary { cursor: pointer; color: var(--link); }
+.mv__attempts { margin: var(--space-2) 0 0; padding-left: 2.2em; font-family: var(--font-mono); font-size: var(--text-mono); }
+.mv__attempts b { font-weight: var(--weight-bold); }
+.mv__attempts .is-hit { color: var(--go); }
+.mv__attempts .is-miss span { color: var(--ink-dim); }
+.mv__loading, .mv__error { margin: 0; padding: var(--space-4); font-style: italic; color: var(--ink-soft); }
+.mv__error { color: var(--danger-deep); font-style: normal; }
+
+@media (prefers-reduced-motion: reduce) { .mt__btn { transition: none; } }
