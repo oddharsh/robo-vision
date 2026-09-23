@@ -3,11 +3,16 @@
 //   bun scripts/build.ts && bun dryrun/run.ts [--only <substring>] [--jobs 4]
 //
 // Each site loads in real Chrome with its OWN CSP in force; nothing is
-// bypassed. That models a site that hosts robo-vision itself: its script-src
-// would admit our file, so the bundle is evaluated over CDP (which script-src
-// cannot see), while everything the bundle then DOES (fetch, DOM writes,
-// adopted styles) meets the page's real policy. Findings are facts the harness
-// can check on its own; judging Markdown quality is left to the saved files.
+// bypassed. That models a site that hosts robo-vision itself, so the lazy
+// build is served from the site's own origin at /__robo-vision/ (a Playwright
+// route) and loaded with a module script, the way a deployment would load it,
+// and its chunks arrive on hover or click like they would in production.
+// Where the page's script-src refuses that path, the site would host the file
+// wherever its policy allows, so the single-file build is evaluated over CDP
+// instead and the fallback is recorded. Either way everything the code DOES
+// (fetch, DOM writes, adopted styles) meets the page's real policy. Findings
+// are facts the harness can check on its own; judging Markdown quality is
+// left to the saved files.
 
 import { chromium, type Page } from "playwright-core";
 import { SITES, type Site } from "./sites.ts";
@@ -15,7 +20,9 @@ import { mkdir } from "node:fs/promises";
 
 const root = new URL("..", import.meta.url).pathname;
 const OUT = root + "dryrun/out/";
-const bundle = await Bun.file(root + "dist/robo-vision.dropin.js").text();
+const DIST = root + "dist/";
+const eager = await Bun.file(DIST + "robo-vision.eager.js").text();
+const MOUNT = "/__robo-vision/";
 
 const args = process.argv.slice(2);
 const only = args.includes("--only") ? args[args.indexOf("--only") + 1] : null;
@@ -117,7 +124,7 @@ async function baseline() {
   const b = await chromium.launch({ channel: "chrome", headless: true });
   const page = await b.newPage({ viewport: { width: 1280, height: 900 } });
   await page.setContent("<!doctype html><html><head><title>baseline</title></head><body><main><p>x</p></main></body></html>");
-  await page.evaluate(bundle);
+  await page.evaluate(eager);
   const s = await styleOf(page);
   await b.close();
   return s!;
@@ -128,8 +135,19 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
   await mkdir(dir, { recursive: true });
   const r: Record<string, unknown> = { ...site, findings: [] as string[] };
   const find = (f: string) => (r.findings as string[]).push(f);
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "en-US" });
+  // service workers blocked: a site's worker would otherwise answer our path
+  // before the route below ever sees it
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "en-US", serviceWorkers: "block" });
   await ctx.addInitScript(INIT);
+  const served: { path: string; t: number; bytes: number }[] = [];
+  await ctx.route((u) => u.pathname.startsWith(MOUNT), async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const file = Bun.file(DIST + path.slice(MOUNT.length));
+    if (!(await file.exists())) return route.fulfill({ status: 404, body: "" });
+    const body = Buffer.from(await file.arrayBuffer());
+    served.push({ path: path.slice(MOUNT.length), t: Date.now(), bytes: body.length });
+    return route.fulfill({ body, contentType: "text/javascript", headers: { "cache-control": "no-store" } });
+  });
   const page = await ctx.newPage();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message.slice(0, 160)}`));
@@ -158,10 +176,24 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
     const vBefore = await page.evaluate(() => (window as unknown as { __rv: { violations: unknown[] } }).__rv.violations.length);
     // a name we are about to write, already in use by the page
     for (const k of Object.keys(before.htmlAttrs)) if (k.startsWith("data-robo-vision")) find(`page already uses <html ${k}>`);
-    try {
-      await page.evaluate(bundle);
-    } catch (e) {
-      find(`inject threw: ${(e as Error).message.split("\n")[0].slice(0, 160)}`);
+    const tInject = Date.now();
+    await page.evaluate((src) => {
+      const s = document.createElement("script");
+      s.type = "module";
+      s.src = src;
+      document.head.append(s);
+    }, MOUNT + "robo-vision.js");
+    const lazyOk = await page.waitForFunction(() => !!document.querySelector("[data-robo-vision] .mt__btn"), null, { timeout: 8_000 }).then(() => true, () => false);
+    r.load = "lazy";
+    if (!lazyOk) {
+      const refused = await page.evaluate((m) => (window as unknown as { __rv: { violations: { directive: string; blocked: string }[] } }).__rv.violations
+        .some((v) => /script-src/.test(v.directive) && v.blocked.includes(m)), MOUNT);
+      r.load = refused ? "eager: script-src refuses a same-origin path" : "eager: module script did not mount";
+      try {
+        await page.evaluate(eager);
+      } catch (e) {
+        find(`inject threw: ${(e as Error).message.split("\n")[0].slice(0, 160)}`);
+      }
     }
     const defined = await page.evaluate(() => !!document.querySelector("[data-robo-vision] .mt__btn"));
     r.mounted = defined;
@@ -201,6 +233,13 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
       return p && (p.dataset.filled || p.querySelector(".mv__error")) ? true : false;
     }, null, { timeout: 30_000 }).then(() => true, () => false);
     r.fillMs = Date.now() - tClick;
+    // what of ours was fetched before anyone showed intent, and what after
+    const at = (t: number) => (t < tClick ? "load" : "intent"); // the pointer only moves after tClick
+    r.bytes = {
+      load: served.filter((f) => f.t >= tInject && at(f.t) === "load").reduce((n, f) => n + f.bytes, 0),
+      intent: served.filter((f) => at(f.t) === "intent").reduce((n, f) => n + f.bytes, 0),
+      files: served.map((f) => `${at(f.t)} ${f.path}`),
+    };
     r.fetches = await page.evaluate(() => (window as unknown as { __rv: { fetches: unknown[] } }).__rv.fetches);
     if (!done) find("machine view never filled in 30s");
 

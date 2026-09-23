@@ -75,57 +75,10 @@ html[data-robo-vision-mode="machine"] [data-human-only] { display: none; }
 .mt__btn:active { filter: brightness(0.9); }
 .mt__btn:focus-visible { outline: 1px dotted var(--ink); outline-offset: -4px; }
 
-/* ---- machine pane ------------------------------------------------------- */
-[data-machine-view] {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  font: var(--text-ui) / var(--leading-ui) var(--font-ui);
-}
-.mv__well {
-  margin: 0;
-  min-height: 12em;
-  max-height: 60vh;
-  overflow: auto;
-  padding: var(--space-3) var(--space-4);
-  background: var(--window);
-  color: var(--ink);
-  font: var(--text-mono) / 1.45 var(--font-mono);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  border: 1px solid;
-  border-color: var(--shadow) var(--highlight) var(--highlight) var(--shadow);
-  box-shadow: var(--bevel-sunken-deep);
-}
-.mv__well:focus-visible { outline: 1px dotted var(--ink); outline-offset: 2px; }
-
-/* the XP status bar: sunken cells on the control face */
-.mv__status {
-  display: flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--face);
-  font-size: var(--text-xs);
-}
-.mv__cell {
-  padding: 1px 6px;
-  border: 1px solid;
-  border-color: var(--shadow) var(--highlight) var(--highlight) var(--shadow);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.mv__cell--grow { flex: 1; min-width: 0; }
-.mv__cell--mono { font-family: var(--font-mono); }
-.mv__cell--served { color: var(--go); }
-.mv__cell--local  { color: var(--danger-deep); }
-
-.mv__how { font-size: var(--text-sm); color: var(--ink-soft); }
-.mv__how summary { cursor: pointer; color: var(--link); }
-.mv__attempts { margin: var(--space-2) 0 0; padding-left: 2.2em; font-family: var(--font-mono); font-size: var(--text-mono); }
-.mv__attempts b { font-weight: var(--weight-bold); }
-.mv__attempts .is-hit { color: var(--go); }
-.mv__attempts .is-miss span { color: var(--ink-dim); }
+/* ---- first paint of the pane -------------------------------------------
+   The pane shows the moment Machine is pressed, before view.ts (and the rest
+   of the pane's skin, in xp-pane.css) has arrived. These two lines are what
+   it shows in the meantime, so they load with the toggle. */
 .mv__loading, .mv__error { margin: 0; padding: var(--space-4); font-style: italic; color: var(--ink-soft); }
 .mv__error { color: var(--danger-deep); font-style: normal; }
 

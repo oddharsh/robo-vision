@@ -11,20 +11,23 @@
 //
 // Light DOM on purpose: the page's own tokens and fonts reach it with no
 // ::part plumbing, which is the whole point of letting a site restyle it.
+//
+// This file is the part every visitor loads: state, keyboard, top layer. The
+// resolver, the generator and the pane live in view.ts and arrive through
+// `loadView` on first use; the imports below from it are types only, which the
+// bundler erases.
 
-import { resolveMachineCopy, factsFromDocument, type MachineCopy, type Step } from "./source.ts";
-import { generateMarkdown } from "./generate.ts";
+import type { MachineCopy } from "./view.ts";
 import { getMode, setMode, initMode, EVENT, type Mode } from "./mode.ts";
 
-const STEP_LABEL: Record<Step, string> = {
-  "in-page": "the page's own machine region",
-  "link-alternate": "declared twin (link rel=alternate)",
-  "negotiated": "same URL, Accept: text/markdown",
-  "md-suffix": ".md next to the page",
-  "generated": "generated here from the live page",
-};
+export type ViewModule = typeof import("./view.ts");
 
 export class ModeToggle extends HTMLElement {
+  /** how the view code arrives; drop-in mode swaps in a loader that also
+   *  brings the pane's skin */
+  loadView: () => Promise<ViewModule> = () => import("./view.ts");
+
+  #view: Promise<ViewModule> | null = null;
   #copy: Promise<MachineCopy> | null = null;
   #buttons: HTMLButtonElement[] = [];
 
@@ -52,6 +55,11 @@ export class ModeToggle extends HTMLElement {
       const next: Mode = getMode() === "human" ? "machine" : "human";
       this.choose(next).then(() => this.#buttons.find((b) => b.dataset.mode === next)?.focus());
     });
+    // intent to use: start fetching the code, never the copy (the copy costs
+    // the site requests, and a hover is not a click)
+    const prefetch = () => void this.#loadView().catch(() => {});
+    this.addEventListener("pointerenter", prefetch, { once: true });
+    this.addEventListener("focusin", prefetch, { once: true });
     document.addEventListener(EVENT, () => this.#sync());
     const m = initMode();
     this.#sync();
@@ -66,16 +74,19 @@ export class ModeToggle extends HTMLElement {
   async choose(mode: Mode) {
     // resolve BEFORE flipping: generation reads computed style, and once the
     // human region is display:none there is nothing visible left to read
-    if (mode === "machine") await this.#ensureCopy();
+    if (mode === "machine") await this.#ensureCopy().catch(() => {});
     setMode(mode);
     if (mode === "machine") await this.#fill();
   }
 
+  #loadView(): Promise<ViewModule> {
+    // a failed load is not cached, so a flaky network gets another try
+    this.#view ??= this.loadView().catch((e) => { this.#view = null; throw e; });
+    return this.#view;
+  }
+
   #ensureCopy(): Promise<MachineCopy> {
-    this.#copy ??= resolveMachineCopy(location.href, {
-      facts: factsFromDocument(document),
-      generate: () => generateMarkdown(document, { exclude: this.getAttribute("exclude")?.split(",") }),
-    });
+    this.#copy ??= this.#loadView().then((v) => v.resolve({ exclude: this.getAttribute("exclude")?.split(",") }));
     return this.#copy;
   }
 
@@ -85,17 +96,18 @@ export class ModeToggle extends HTMLElement {
     this.#show(pane, true);
     pane.setAttribute("aria-busy", "true");
     pane.replaceChildren(Object.assign(document.createElement("p"), { className: "mv__loading", textContent: "Reading the machine copy…" }));
-    let copy: MachineCopy;
     try {
-      copy = await this.#ensureCopy();
+      const [view, copy] = await Promise.all([this.#loadView(), this.#ensureCopy()]);
+      pane.dataset.filled = copy.step;
+      pane.replaceChildren(view.renderPane(copy));
     } catch (e) {
+      // one failed attempt per click: choose() and this share the promise, and
+      // clearing it here lets the NEXT click try again
+      this.#copy = null;
       pane.replaceChildren(Object.assign(document.createElement("p"), { className: "mv__error", textContent: `No machine copy: ${(e as Error).message}` }));
+    } finally {
       pane.removeAttribute("aria-busy");
-      return;
     }
-    pane.dataset.filled = copy.step;
-    pane.removeAttribute("aria-busy");
-    pane.replaceChildren(renderPane(copy));
   }
 
   #sync() {
@@ -133,42 +145,6 @@ export class ModeToggle extends HTMLElement {
     dock.showPopover();
     if (focused instanceof HTMLElement && dock.contains(focused)) focused.focus();
   }
-}
-
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
-  const e = document.createElement(tag);
-  e.className = cls;
-  if (text != null) e.textContent = text;
-  return e;
-}
-
-function renderPane(copy: MachineCopy): DocumentFragment {
-  const frag = document.createDocumentFragment();
-  const well = el("pre", "mv__well");
-  well.textContent = copy.text; // text, never HTML: this is somebody's Markdown
-  well.tabIndex = 0; // a scrollable region has to be reachable by keyboard
-  well.setAttribute("aria-label", "Machine copy");
-
-  const bar = el("div", "mv__status");
-  bar.append(
-    el("span", "mv__cell mv__cell--grow", STEP_LABEL[copy.step]),
-    el("span", `mv__cell mv__cell--${copy.served ? "served" : "local"}`,
-      copy.served ? "served to agents" : copy.step === "in-page" ? "on the page, not negotiated" : "not what agents receive"),
-    el("span", "mv__cell mv__cell--mono", `${copy.text.length.toLocaleString()} chars`),
-  );
-
-  const how = el("details", "mv__how");
-  how.append(el("summary", "", "How it was found"));
-  const ol = el("ol", "mv__attempts");
-  for (const a of copy.attempts) {
-    const li = el("li", a.hit ? "is-hit" : "is-miss");
-    li.append(el("b", "", a.step), document.createTextNode(` ${a.url ? new URL(a.url).pathname : ""} `), el("span", "", a.reason + (a.note ? ` (${a.note})` : "") + (a.ms != null ? `, ${a.ms} ms` : "")));
-    ol.append(li);
-  }
-  how.append(ol);
-
-  frag.append(well, bar, how);
-  return frag;
 }
 
 customElements.define("mode-toggle", ModeToggle);

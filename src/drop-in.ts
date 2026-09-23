@@ -10,11 +10,14 @@
 //   import { dropIn } from "robo-vision/drop-in";
 //   dropIn({ corner: "bottom-right" });
 
+import type { ModeToggle } from "./mode-toggle.ts";
 import "./mode-toggle.ts";
+import { adopt } from "./adopt.ts";
 
 export interface DropInOptions {
   corner?: "bottom-right" | "bottom-left" | "top-right" | "top-left";
-  /** CSS to adopt (tokens + a flavor); the IIFE build passes the XP skin */
+  /** CSS for the toggle and the overlay's box, adopted now; the pane's own
+   *  skin arrives later with the view code (drop-in-view.ts) */
   css?: string;
 }
 
@@ -23,13 +26,7 @@ export const MARK = "data-robo-vision";
 export function dropIn(opts: DropInOptions = {}): { dock: HTMLElement; pane: HTMLElement } | null {
   if (document.querySelector(`[${MARK}]`)) return null; // idempotent: one dock per page
 
-  if (opts.css) {
-    // adopted rather than a <style> tag: a constructed sheet is not an inline
-    // style element, so it lands on pages whose CSP refuses inline styles
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(opts.css);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-  }
+  adopt(opts.css ?? "");
 
   const pane = document.createElement("section");
   pane.id = "robo-vision-pane";
@@ -42,8 +39,11 @@ export function dropIn(opts: DropInOptions = {}): { dock: HTMLElement; pane: HTM
   const dock = document.createElement("div");
   dock.className = `rv-dock rv-dock--${opts.corner ?? "bottom-right"}`;
   dock.setAttribute(MARK, "dock");
-  const toggle = document.createElement("mode-toggle");
+  const toggle = document.createElement("mode-toggle") as ModeToggle;
   toggle.setAttribute("for", pane.id);
+  // set before the element connects: a stored machine mode loads the view
+  // straight away, and it has to be this loader that does it
+  toggle.loadView = () => import("./drop-in-view.ts");
   dock.append(toggle);
 
   // both go in the top layer where the browser has it (Chrome 114, Safari 17,

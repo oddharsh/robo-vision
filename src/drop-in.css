@@ -43,4 +43,3 @@
   background: var(--surface-desktop);
   color: var(--ink);
 }
-.rv-overlay .mv__well { max-height: none; min-height: 60vh; }

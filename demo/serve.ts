@@ -9,13 +9,19 @@ import { PREPAINT } from "../src/mode.ts";
 const port = Number(process.argv[2] ?? 8841);
 const here = new URL(".", import.meta.url).pathname;
 
+// split like the real build, so the demo exercises the lazy view: the toggle
+// loads with the page, view.ts arrives on hover or first click
 const built = await Bun.build({
   entrypoints: [`${here}../src/mode-toggle.ts`],
   target: "browser",
+  format: "esm",
+  splitting: true,
   minify: false,
+  naming: { entry: "[name].js", chunk: "chunks/[name]-[hash].js" },
 });
 if (!built.success) throw new AggregateError(built.logs, "bundle failed");
-const bundle = await built.outputs[0].text();
+const js = new Map<string, string>();
+for (const o of built.outputs) js.set("/js/" + o.path.replace(/^\.\//, ""), await o.text());
 
 const CASES = {
   bare:       "Nothing published. The toggle has to generate.",
@@ -46,6 +52,7 @@ const page = (c: Case) => `<!doctype html>
 ${c === "declared" ? `<link rel="alternate" type="text/markdown" href="/twins/declared-copy.md">` : ""}
 <link rel="stylesheet" href="/demo.css">
 <link rel="stylesheet" href="/xp.css">
+<link rel="stylesheet" href="/xp-pane.css">
 </head>
 <body>
 <div class="ds-window">
@@ -90,7 +97,7 @@ note    authored by the page itself, the way /connect/ ships its own
     <section id="machine-pane" data-machine-view hidden aria-label="Machine view"></section>
   </div>
 </div>
-<script type="module" src="/mode-toggle.js"></script>
+<script type="module" src="/js/mode-toggle.js"></script>
 </body>
 </html>`;
 
@@ -105,8 +112,8 @@ const server = Bun.serve({
     const { pathname } = new URL(req.url);
     const accept = req.headers.get("accept") ?? "";
     if (pathname === "/") return Response.redirect(`/bare`, 302);
-    if (pathname === "/mode-toggle.js") return new Response(bundle, { headers: { "content-type": "text/javascript" } });
-    if (pathname === "/xp.css") return new Response(Bun.file(`${here}../src/xp.css`));
+    if (js.has(pathname)) return new Response(js.get(pathname), { headers: { "content-type": "text/javascript" } });
+    if (pathname === "/xp.css" || pathname === "/xp-pane.css") return new Response(Bun.file(`${here}../src${pathname}`));
     if (pathname === "/demo.css") return new Response(Bun.file(`${here}demo.css`));
     if (/^\/[a-z]+\.css$/.test(pathname)) return new Response(Bun.file(`${here}${pathname.slice(1)}`));
 
