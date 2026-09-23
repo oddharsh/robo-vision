@@ -162,7 +162,7 @@ function renderPane(copy: MachineCopy): DocumentFragment {
   const ol = el("ol", "mv__attempts");
   for (const a of copy.attempts) {
     const li = el("li", a.hit ? "is-hit" : "is-miss");
-    li.append(el("b", "", a.step), document.createTextNode(` ${a.url ? new URL(a.url).pathname : ""} `), el("span", "", a.reason + (a.ms != null ? `, ${a.ms} ms` : "")));
+    li.append(el("b", "", a.step), document.createTextNode(` ${a.url ? new URL(a.url).pathname : ""} `), el("span", "", a.reason + (a.note ? ` (${a.note})` : "") + (a.ms != null ? `, ${a.ms} ms` : "")));
     ol.append(li);
   }
   how.append(ol);

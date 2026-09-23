@@ -7,7 +7,9 @@
 //                   <section data-machine-only>). Zero requests.
 //   link-alternate  <link rel="alternate" type="text/markdown" href>. The site
 //                   declared its twin. Zero requests to find, one to read.
-//   negotiated      the page URL again with Accept: text/markdown.
+//   negotiated      the page URL again with Accept: text/markdown; once more
+//                   with a throwaway param if a cache that ignores Accept
+//                   answered for it.
 //   md-suffix       the llms.txt convention: /foo -> /foo.md, / -> /index.html.md.
 //   generated       nothing exists, so walk the DOM we already have.
 //
@@ -26,6 +28,8 @@ export interface Attempt {
   reason: string;
   /** wall time this step took, so a slow door is visible in the pane */
   ms?: number;
+  /** how the request was sent, when that differs from plain (cache-busted, retried) */
+  note?: string;
 }
 
 export interface MachineCopy {
@@ -55,7 +59,13 @@ export interface ResolveOptions {
   skip?: Step[];
   /** extra request headers (a CLI identifies itself; a browser cannot) */
   headers?: Record<string, string>;
+  /** retry negotiation with a throwaway query param when the plain answer
+   *  came from a cache that cannot tell Markdown from HTML (default true) */
+  cacheBust?: boolean;
 }
+
+/** the throwaway param; a name no page plausibly reads, so the origin ignores it */
+export const BUST_PARAM = "_rv";
 
 const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown"]);
 
@@ -106,7 +116,9 @@ export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions =
     ({ step, served, url, contentType, text, attempts });
 
   const now = () => globalThis.performance?.now() ?? Date.now();
-  const tryFetch = async (step: Step, url: string, init: RequestInit): Promise<MachineCopy | null> => {
+  // `url` is what goes on the wire; `shown` is what the pane and the result
+  // report, so a cache-busting param never leaks into a link someone copies
+  const tryFetch = async (step: Step, url: string, init: RequestInit, shown = url, note = ""): Promise<{ copy: MachineCopy | null; status: number | null; varies: boolean }> => {
     const t0 = now();
     let res: Response;
     let body: string;
@@ -114,12 +126,13 @@ export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions =
       res = await f(url, init);
       body = await res.text();
     } catch (e) {
-      attempts.push({ step, url, hit: false, reason: `fetch failed: ${(e as Error).message}`, ms: Math.round(now() - t0) });
-      return null;
+      attempts.push({ step, url: shown, hit: false, reason: `fetch failed: ${(e as Error).message}`, ms: Math.round(now() - t0), ...(note && { note }) });
+      return { copy: null, status: null, varies: false };
     }
     const why = rejectReason(res, body, res.url || url);
-    attempts.push({ step, url, hit: !why, reason: why ?? `${res.headers.get("content-type")}, ${body.length} chars`, ms: Math.round(now() - t0) });
-    return why ? null : done(step, true, res.url || url, res.headers.get("content-type"), body);
+    attempts.push({ step, url: shown, hit: !why, reason: why ?? `${res.headers.get("content-type")}, ${body.length} chars`, ms: Math.round(now() - t0), ...(note && { note }) });
+    const varies = /(?:^|,)\s*(?:accept|\*)\s*(?:,|$)/i.test(res.headers.get("vary") ?? "");
+    return { copy: why ? null : done(step, true, shown, res.headers.get("content-type"), body), status: res.status, varies };
   };
 
   // the browser's HTTP cache keys on URL and honours Vary only when the server
@@ -142,22 +155,44 @@ export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions =
     const alts = (facts?.alternates ?? []).map((h) => new URL(h, pageUrl).href);
     if (!alts.length) attempts.push({ step: "link-alternate", url: null, hit: false, reason: facts ? "none declared" : "no page facts" });
     for (const href of alts) {
-      const hit = await tryFetch("link-alternate", href, md("text/markdown, text/plain;q=0.5"));
-      if (hit) return hit;
+      const { copy } = await tryFetch("link-alternate", href, md("text/markdown, text/plain;q=0.5"));
+      if (copy) return copy;
     }
   }
 
   if (!skip.has("negotiated")) {
     // markdown alone, no HTML fallback offered: a server that cannot comply
-    // should say so (406) or send HTML, and rejectReason reads either one
-    const hit = await tryFetch("negotiated", pageUrl, md("text/markdown"));
-    if (hit) return hit;
+    // should say so (406) or send HTML, and rejectReason reads either one.
+    //
+    // Ask plainly first, because a plain request is what an agent sends and
+    // its answer is what an agent gets, cached copy and all. Only when that
+    // answer is not Markdown AND the response does not vary on Accept is the
+    // shared cache a suspect: it keys on the URL and hands back whichever
+    // representation it stored last. Then a throwaway param (CData's trick,
+    // `?_mdcb=`) reaches the origin. Measured 2026-09-23: webflow.com answered
+    // Markdown on 1 of 4 plain requests (all cache HITs, no Vary: Accept) and
+    // 4 of 4 busted ones (all MISSes). Busting every time was tried and
+    // rejected: cdata.com varies correctly, and busting it showed the origin's
+    // fresh copy while agents were being served a 21-minute-old cached one
+    // with a JSON-LD block the origin had since dropped.
+    const plain = new URL(pageUrl);
+    plain.hash = "";
+    const first = await tryFetch("negotiated", plain.href, md("text/markdown"), pageUrl);
+    if (first.copy) return first.copy;
+    const suspectCache = first.status !== null && first.status < 400 && !first.varies;
+    if (opts.cacheBust !== false && suspectCache) {
+      const wire = new URL(plain);
+      wire.searchParams.set(BUST_PARAM, Math.random().toString(36).slice(2, 10));
+      const busted = await tryFetch("negotiated", wire.href, md("text/markdown"), pageUrl,
+        "cache-busted: the plain answer was not Markdown and the response does not vary on Accept");
+      if (busted.copy) return busted.copy;
+    }
   }
 
   if (!skip.has("md-suffix")) {
     for (const url of suffixCandidates(pageUrl)) {
-      const hit = await tryFetch("md-suffix", url, md("text/markdown, text/plain;q=0.5"));
-      if (hit) return hit;
+      const { copy } = await tryFetch("md-suffix", url, md("text/markdown, text/plain;q=0.5"));
+      if (copy) return copy;
     }
   }
 

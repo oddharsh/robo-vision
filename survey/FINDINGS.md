@@ -40,7 +40,7 @@ cdata.com needs `--headful`, because it answers headless Chrome with a 403.
 
 ## What robo-vision should take from this
 
-- **CData's cache-buster beats `cache: "no-store"`.** `no-store` only skips the browser's cache; the edge cache that makes Webflow's and Cloudflare's negotiation flaky keys on the URL, and a unique query param is the one thing that misses it. Tradeoff: an origin that treats unknown params differently will answer something else.
+- **CData's cache-buster beats `cache: "no-store"`.** `no-store` only skips the browser's cache; the edge cache that makes Webflow's and Cloudflare's negotiation flaky keys on the URL, and a unique query param is the one thing that misses it. **Adopted, conditionally:** robo-vision asks plainly first and busts only when the answer was not Markdown and the response lacks `Vary: Accept`. Busting unconditionally was measured and rejected: CData itself varies correctly, and a busted request showed its origin's fresh copy (26,839 chars) while agents were served a 21-minute-old cached one (29,060 chars, with a JSON-LD block since dropped).
 - **Speakeasy lazy-loads the view** (`agent-view-content.*.js` arrives on click). robo-vision's drop-in ships 33 KB up front; the resolver and generator could arrive on first toggle.
 - **`data-mode` is taken three times over** in this survey alone (Parallel, Cloudflare, Kong), on top of docs.claude.com's theme. Namespacing was right.
 - **A machine URL** (Parallel's `/ai`, Kong's `?mode=agent`) is common. robo-vision's `?robo-vision=machine` covers it.

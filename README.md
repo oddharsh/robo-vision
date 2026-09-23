@@ -48,6 +48,16 @@ in-page, link-alternate, negotiated, md-suffix, generated. A fetched step hits
 on the response BODY and TYPE, never the status: both traps answer 200 (a
 URL-keyed cache returning the page's HTML, a SPA shell answering `/x.md`).
 
+Negotiation asks plainly first, since that is the request an agent sends and
+its answer, cached or not, is what an agent reads. When that answer is not
+Markdown and the response does not vary on `Accept`, the shared cache cannot
+tell the two representations apart, so the lookup retries once with a
+throwaway `?_rv=` param that the cache has never seen (CData's trick). The pane
+names the retry. Measured on webflow.com: Markdown on 2 of 4 lookups before,
+4 of 4 after. Busting every request was tried and rejected, because on a site
+that varies correctly (cdata.com) it shows the origin's fresh copy while agents
+are served a cached one, and it costs the site a cache miss per toggle.
+
 ## Dry run (2026-09-23)
 
 `bun scripts/build.ts && bun dryrun/run.ts` loads 34 live sites in Chrome with
@@ -74,8 +84,9 @@ Fixing those surfaced three more on the second run, each now a browser test:
 closed `<details>`), which is now kept rather than dropped.
 
 Where the 34 got their copy: 12 served Markdown (declared, negotiated or
-`.md`), 1 an in-page region, 21 generated. Webflow's negotiation is flaky
-because it omits `Vary: Accept`, so it lands in either bucket run to run.
+`.md`), 1 an in-page region, 21 generated. Webflow's negotiation was flaky
+because it omits `Vary: Accept`, so its edge cache hands back whichever
+representation it stored last. The cache-buster below fixed it.
 
 ## Known costs
 
