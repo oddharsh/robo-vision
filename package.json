@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "A Human/Machine toggle that shows the copy an agent is actually served, and generates one only when a site publishes nothing.",
+  "license": "MIT",
   "scripts": {
     "test": "bun test",
     "demo": "bun demo/serve.ts 8841",
