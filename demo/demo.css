@@ -1,77 +1,32 @@
-/* demo.css: the page around the toggle. Tokens are the aadhar.sh design
-   system's own files, copied verbatim; the window chrome is Window.jsx's CSS
-   with the React taken out. */
-@import "colors.css";
-@import "fonts.css";
-@import "typography.css";
-@import "bevels.css";
+/* demo.css: the demo SITE's own stylesheet. robo-vision needs none of it.
 
-html { background: var(--surface-desktop); }
-body {
-  margin: 0;
-  padding: var(--space-7) var(--space-6);
-  font: var(--text-body) / var(--leading-body) var(--font-ui);
-  color: var(--text-body);
-}
+   The first part is an ordinary page. The last part is the point: it is how a
+   host restyles robo-vision, with custom properties for the common knobs and
+   plain rules on robo-vision's classes for anything else. No !important, no
+   specificity tricks; base.css is written to lose to exactly this. */
 
-.ds-window {
-  max-width: 720px;
-  margin: 0 auto;
-  background: var(--window);
-  border: var(--border-window);
-  border-right-color: oklch(33% 0.18 var(--hue-luna));
-  border-bottom-color: oklch(33% 0.18 var(--hue-luna));
-  border-top-left-radius: var(--radius-window);
-  border-top-right-radius: var(--radius-window);
-  overflow: hidden;
-  box-shadow: var(--frame-window);
+:root { color-scheme: light dark; }
+body { margin: 0; font: 16px/1.55 system-ui, sans-serif; }
+.site { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+.bar {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  padding-bottom: 12px; margin-bottom: 24px;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent);
 }
-.ds-titlebar {
-  background: var(--grad-title);
-  color: var(--text-title);
-  font: var(--weight-bold) var(--text-ui) var(--font-caption);
-  padding: 4px 6px 4px 8px;
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  text-shadow: 1px 1px #0f1089;
-  border-top-left-radius: 7px; border-top-right-radius: 6px;
-  user-select: none;
-}
-.ds-tb-title { display: flex; align-items: center; gap: 6px; }
-.ds-tb-icon { width: 16px; height: 16px; position: relative; display: inline-block; background: var(--danger); }
-.ds-tb-icon::before { content: ""; position: absolute; inset: 2px 4px; background: oklch(87.8% 0.088 66.3); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
-.ds-tb-controls { display: flex; gap: 2px; }
-.ds-tb-controls span {
-  width: 21px; height: 21px; box-sizing: border-box; border-radius: var(--radius-gel);
-  border: 1px solid #6696eb;
-  background: linear-gradient(180deg, #5f8cf7 0%, #3a71f5 22%, #3e73f5 55%, #2a70f2 82%, #1045be 100%);
-}
-.ds-tb-controls .close { border-color: #d8401c; background: linear-gradient(180deg, #e8795f 0%, #e45f40 30%, #e45d3d 52%, #e2552a 80%, #ae3110 100%); }
+.cases { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 14px; }
+.cases a[aria-current] { color: inherit; font-weight: 600; text-decoration: none; }
+h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+h2 { font-size: 18px; margin: 28px 0 8px; }
+.lede { color: GrayText; margin-top: 0; }
+table { border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 6px 10px; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+code { font-size: 0.9em; }
+.decoration { color: GrayText; font-family: ui-monospace, monospace; }
 
-/* the toolbar strip: control face, one rule under it, like Explorer's */
-.toolbar {
-  display: flex; align-items: center; gap: var(--space-3);
-  padding: 2px var(--space-2);
-  background: var(--face);
-  border-bottom: 1px solid var(--shadow);
-  box-shadow: inset 0 1px 0 var(--highlight);
-  font: var(--text-ui) var(--font-ui);
+/* ---- restyling robo-vision, the way any site would ---------------------- */
+:root {
+  --rv-accent: #4f46e5;
+  --rv-accent-fg: #fff;
+  --rv-radius: 6px;
 }
-.cases { display: flex; flex-wrap: wrap; gap: 0 var(--space-4); flex: 1; }
-.cases a { color: var(--link); }
-.cases a[aria-current] { color: var(--ink); font-weight: var(--weight-bold); text-decoration: none; }
-.toolbar__sep { width: 2px; align-self: stretch; margin: 2px 0; border-left: 1px solid var(--shadow); border-right: 1px solid var(--highlight); }
-
-.ds-window-content { padding: var(--pad-content); }
-h1 { font: var(--weight-bold) var(--text-h1) / var(--leading-tight) var(--font-caption); color: var(--text-heading); letter-spacing: var(--tracking-heading); margin: 0 0 var(--space-3); }
-h2 { font: var(--weight-bold) var(--text-h2) / var(--leading-tight) var(--font-caption); color: var(--text-heading); margin: var(--space-6) 0 var(--space-2); }
-.lede { color: var(--ink-soft); }
-code { font: var(--text-mono) var(--font-mono); }
-table { border-collapse: collapse; font-size: var(--text-ui); }
-th, td { padding: var(--pad-row); border: var(--border-1); text-align: left; }
-tr:nth-child(odd) td { background: var(--row-alt); }
-button {
-  font: var(--text-ui) var(--font-ui); padding: var(--pad-control);
-  border: 1px solid var(--frame); border-radius: var(--radius-control);
-  background: var(--grad-button); box-shadow: var(--bevel-raised);
-}
-.decoration { color: var(--warn); font-family: var(--font-mono); }
+.mt { padding: 3px; border-radius: 8px; background: color-mix(in srgb, CanvasText 6%, transparent); }

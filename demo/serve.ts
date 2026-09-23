@@ -50,25 +50,17 @@ const page = (c: Case) => `<!doctype html>
 <title>${c} · robo-vision</title>
 <script>${PREPAINT}</script>
 ${c === "declared" ? `<link rel="alternate" type="text/markdown" href="/twins/declared-copy.md">` : ""}
-<link rel="stylesheet" href="/demo.css">
 <link rel="stylesheet" href="/base.css">
 <link rel="stylesheet" href="/base-pane.css">
-<link rel="stylesheet" href="/skins/xp.css">
-<link rel="stylesheet" href="/skins/xp-pane.css">
+<link rel="stylesheet" href="/demo.css">
 </head>
 <body>
-<div class="ds-window">
-  <div class="ds-titlebar">
-    <span class="ds-tb-title"><span class="ds-tb-icon" aria-hidden="true"></span><span>${c} - robo-vision</span></span>
-    <span class="ds-tb-controls" aria-hidden="true"><span class="min"></span><span class="max"></span><span class="close"></span></span>
-  </div>
-  <div class="toolbar">
+<div class="site">
+  <header class="bar">
     <nav class="cases" aria-label="Cases">${(Object.keys(CASES) as Case[])
       .map((k) => `<a href="/${k}"${k === c ? ' aria-current="page"' : ""}>${k}</a>`).join("")}</nav>
-    <span class="toolbar__sep" aria-hidden="true"></span>
-    <mode-toggle for="machine-pane"></mode-toggle>
-  </div>
-  <div class="ds-window-content">
+    <mode-toggle for="machine-pane" machine-label="Agent"></mode-toggle>
+  </header>
     <main data-human-only>
       <h1>The ${c} case</h1>
       <p class="lede">${CASES[c]}</p>
@@ -97,7 +89,6 @@ case    inline
 note    authored by the page itself, the way /connect/ ships its own
 </section>` : ""}
     <section id="machine-pane" data-machine-view hidden aria-label="Machine view"></section>
-  </div>
 </div>
 <script type="module" src="/js/mode-toggle.js"></script>
 </body>
@@ -116,9 +107,7 @@ const server = Bun.serve({
     if (pathname === "/") return Response.redirect(`/bare`, 302);
     if (js.has(pathname)) return new Response(js.get(pathname), { headers: { "content-type": "text/javascript" } });
     if (pathname === "/base.css" || pathname === "/base-pane.css") return new Response(Bun.file(`${here}../src${pathname}`));
-    if (pathname.startsWith("/skins/")) return new Response(Bun.file(`${here}..${pathname}`));
     if (pathname === "/demo.css") return new Response(Bun.file(`${here}demo.css`));
-    if (/^\/[a-z]+\.css$/.test(pathname)) return new Response(Bun.file(`${here}${pathname.slice(1)}`));
 
     if (pathname === "/twins/declared-copy.md") return md(twin("declared"));
     if (pathname === "/suffix.md") return new Response(twin("suffix"), { headers: { "content-type": "text/plain; charset=utf-8" } });

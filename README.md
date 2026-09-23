@@ -6,11 +6,10 @@ served, and generates one only when a site publishes nothing.
 ```
 src/source.ts       find an existing machine copy; the judgement is rejectReason()
 src/generate.ts     last resort: live DOM to Markdown
-src/mode.ts         headless state: html[data-mode], storage, ?mode=, PREPAINT
+src/mode.ts         headless state: html[data-robo-vision-mode], storage, ?robo-vision=
 src/mode-toggle.ts  <mode-toggle>, semantics only
 src/base.css        the only CSS robo-vision ships: integrity rules, plus a
-                    neutral look in @layer robo-vision that any site CSS beats
-skins/xp*.css       one optional skin (aadhar.sh's XP Luna), built to dist/skins/xp.css
+                    neutral look any site CSS for its classes beats
 src/copies.ts       the data layer: a copy for any same-origin URL, no rendering
 src/view.ts         the lazy half: renderPane(), plus copies.ts re-exported
 src/drop-in.ts      zero-markup mode: a docked toggle and a top-layer overlay
@@ -31,18 +30,27 @@ test/               bun test (the generator tests drive real Chrome)
 Host `dist/` at that path. No markup, no inline script or style for a CSP to
 allow (styles are adopted as constructed sheets), no server changes.
 
-It brings no look of its own worth keeping. The base follows the site's font
-and color scheme, reads `--rv-bg`, `--rv-fg`, `--rv-accent`, `--rv-border`,
-`--rv-radius`, `--rv-font`, `--rv-mono` and a few more from any ancestor, and
-sits in `@layer robo-vision`, so a site restyles it by writing ordinary CSS
-for `.rv-dock`, `.mt__btn`, `.mv__well` and friends: no `!important`, no
-specificity games. Only the rules it needs to function are unlayered, so a
-global reset like `* { box-sizing: content-box }` cannot break it. Labels,
-titles and the corner are attributes. A skin is just more CSS:
+It brings no look of its own. The base follows the site's font and color
+scheme through system colors, and reads `--rv-bg`, `--rv-fg`, `--rv-accent`,
+`--rv-accent-fg`, `--rv-border`, `--rv-radius`, `--rv-font`, `--rv-mono` and a
+few more from any ancestor, `:root` included. Labels, titles and the corner are
+attributes.
 
-```html
-<link rel="stylesheet" href="/robo-vision/skins/xp.css">
-```
+For anything the variables do not cover, a site writes ordinary CSS for
+`.rv-dock`, `.mt`, `.mt__btn`, `.mv__well` and friends. Every base look rule
+has the specificity of one element (`button:where(.mt__btn)`), which sets the
+contract:
+
+| the site writes | specificity | outcome |
+|---|---|---|
+| `.mt__btn { ... }` | 0,1,0 | the site wins |
+| `button { padding: 0 }`, a reset | 0,0,1 | ties; robo-vision's sheet is adopted later and wins |
+| `* { box-sizing: content-box }` | 0,0,0 | robo-vision wins |
+
+The rules it needs to function (hiding the page in machine view, the overlay's
+box, the box model) are plain class selectors, so a global reset cannot break
+it. A site's look for robo-vision lives in that site's stylesheet; this
+repository ships no skins. `demo/demo.css` shows the pattern in a few lines.
 
 ## Overhead
 
@@ -71,9 +79,6 @@ bun test
 bun run demo                      # http://localhost:8841
 bun run probe https://parallel.ai/ https://www.cloudflare.com/connect/ https://konghq.com/
 ```
-
-The demo's token files (`demo/colors.css` and friends) are the aadhar.sh
-Luna design system's own, copied verbatim.
 
 ## What the three sites built (probed 2026-09-23)
 

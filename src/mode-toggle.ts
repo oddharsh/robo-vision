@@ -1,9 +1,9 @@
 // mode-toggle.ts: <mode-toggle>, the presenter.
 //
 // The element renders SEMANTICS and no styles: a radiogroup of two radios, and
-// a machine pane it fills on first use. The flavor is a stylesheet keyed on
-// its classes and on html[data-robo-vision-mode], so the same element is a floating pill on
-// one site and an XP toolbar toggle on another (see xp.css).
+// a machine pane it fills on first use. Its look is base.css plus whatever the
+// host site writes for its classes and html[data-robo-vision-mode], so the same
+// element can be a floating pill on one site and a toolbar control on another.
 //
 //   <mode-toggle for="machine-pane" human-label="Human" machine-label="Agent"></mode-toggle>
 //   <div data-human-only>...the page...</div>

@@ -21,8 +21,8 @@
    the toggle's padding with a global `button {}` reset (Tailwind's preflight
    and friends). The defaults read --rv-* custom properties set on any
    ancestor, :root included, and fall back to system colors, so the dock
-   follows the site's font and color-scheme instead of bringing a palette. A
-   skin (skins/xp.css is aadhar.sh's) is ordinary CSS on top. */
+   follows the site's font and color-scheme instead of bringing a palette.
+   A site that wants its own look writes it in its own stylesheet. */
 
 /* ---- integrity ----------------------------------------------------------- */
 html[data-robo-vision-mode="machine"] [data-human-only] { display: none; }

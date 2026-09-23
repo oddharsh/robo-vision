@@ -62,8 +62,9 @@ test("the entry carries none of the view: it lives in chunks", async () => {
 });
 
 test("no @font-face ships: it cannot be scoped, so it would restyle the host page", async () => {
-  // aadhar.sh sets its text in the same families the design system declares;
-  // with the declarations adopted, its CLS went 0.001 -> 0.168 on every run
+  // an early build carried local() declarations for Tahoma, Verdana and
+  // friends; on a site set in those families (aadhar.sh), adopting them moved
+  // CLS from 0.001 to 0.168 on every run
   for (const f of ["dist/robo-vision.js", "dist/robo-vision.eager.js"]) {
     expect(await Bun.file(ROOT + f).text()).not.toContain("@font-face");
   }
