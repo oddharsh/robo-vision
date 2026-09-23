@@ -105,7 +105,13 @@ async function styleOf(page: Page) {
     if (!b) return null;
     const cs = getComputedStyle(b);
     const r = b.getBoundingClientRect();
-    return { rect: { x: r.x, y: r.y, w: r.width, h: r.height }, css: Object.fromEntries(props.map((p) => [p, cs[p as keyof CSSStyleDeclaration] as string])) };
+    // which scheme the dock actually resolved: CanvasText is light on dark
+    const probe = document.createElement("span");
+    probe.style.color = "CanvasText";
+    b.parentElement!.append(probe);
+    const [cr, cg, cb] = getComputedStyle(probe).color.match(/\d+/g)!.map(Number);
+    probe.remove();
+    return { rect: { x: r.x, y: r.y, w: r.width, h: r.height }, dark: cr + cg + cb > 382, css: Object.fromEntries(props.map((p) => [p, cs[p as keyof CSSStyleDeclaration] as string])) };
   }, STYLE_PROPS as unknown as string[]);
 }
 
@@ -120,10 +126,13 @@ async function topAt(page: Page, x: number, y: number) {
   }, [x, y] as [number, number]);
 }
 
-async function baseline() {
+// one baseline per color scheme: the base's defaults are system colors, so a
+// dark site turning the dock dark is the design working, and comparing it to a
+// light baseline reported nuxt.com as "page CSS changed the toggle"
+async function baseline(scheme: "light" | "dark") {
   const b = await chromium.launch({ channel: "chrome", headless: true });
   const page = await b.newPage({ viewport: { width: 1280, height: 900 } });
-  await page.setContent("<!doctype html><html><head><title>baseline</title></head><body><main><p>x</p></main></body></html>");
+  await page.setContent(`<!doctype html><html><head><title>baseline</title><style>:root{color-scheme:${scheme}}</style></head><body><main><p>x</p></main></body></html>`);
   await page.evaluate(eager);
   // it mounts on idle now, so wait for it rather than read an empty page
   await page.waitForSelector("[data-robo-vision] .mt__btn");
@@ -132,7 +141,8 @@ async function baseline() {
   return s!;
 }
 
-async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, site: Site, base: Awaited<ReturnType<typeof baseline>>) {
+type Base = NonNullable<Awaited<ReturnType<typeof styleOf>>>;
+async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, site: Site, bases: { light: Base; dark: Base }) {
   const dir = OUT + slug(site.url) + "/";
   await mkdir(dir, { recursive: true });
   const r: Record<string, unknown> = { ...site, findings: [] as string[] };
@@ -214,6 +224,8 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
     // does the page's CSS reach into our toggle?
     const st = await styleOf(page);
     r.style = st;
+    const base = bases[st?.dark ? "dark" : "light"];
+    r.scheme = st?.dark ? "dark" : "light";
     const drift = st ? STYLE_PROPS.filter((p) => st.css[p] !== base.css[p]).map((p) => `${p}: ${base.css[p]} -> ${st.css[p]}`) : [];
     r.styleDrift = drift;
     if (drift.length) find(`page CSS changed the toggle (${drift.length} props)`);
@@ -314,14 +326,14 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
 }
 
 await mkdir(OUT, { recursive: true });
-const base = await baseline();
-await Bun.write(OUT + "baseline.json", JSON.stringify(base, null, 2));
+const bases = { light: await baseline("light"), dark: await baseline("dark") };
+await Bun.write(OUT + "baseline.json", JSON.stringify(bases, null, 2));
 const browser = await chromium.launch({ channel: "chrome", headless: true });
 const results: Record<string, unknown>[] = [];
 const queue = [...roster];
 await Promise.all(Array.from({ length: jobs }, async () => {
   for (let s = queue.shift(); s; s = queue.shift()) {
-    const r = await runSite(browser, s, base);
+    const r = await runSite(browser, s, bases);
     results.push(r);
     const f = r.findings as string[];
     console.log(`${f.length ? "!" : "."} ${s.url}  ${(r.pane as { step?: string } | undefined)?.step ?? "-"}  ${f.length} finding(s)`);
