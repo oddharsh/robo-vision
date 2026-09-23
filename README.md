@@ -52,8 +52,8 @@ and without the script tag:
 
 | stage | cost |
 |---|---|
-| every page view | 1 request, 9,246 B (3.6 KB gzip), mounted after load on idle; +0 to 2 ms script, +1 to 14 ms main thread, CLS unchanged, load and LCP within noise; **no requests to the site** |
-| first hover or focus | 2 requests, the view code, 12.9 KB (5.8 KB gzip) |
+| every page view | 1 request, 9,334 B (3.6 KB gzip), mounted after load on idle; +0 to 2 ms script, +1 to 14 ms main thread, CLS unchanged, load and LCP within noise; **no requests to the site** |
+| first hover or focus | 2 requests, the view code, 13.2 KB (5.9 KB gzip) |
 | clicking Machine | 1 to 4 requests to the site, median 267 ms to a served copy; generation itself 2 ms median, 15 ms worst (Wikipedia) |
 | a section serving nothing | its first page pays the lookups; the rest of it, for the session, none |
 | each link followed in the pane | ~1 request, ~9 KB, against 1.3 to 8.3 MB for a normal load |
