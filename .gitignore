@@ -4,3 +4,4 @@ dist/
 dryrun/out/
 dryrun/run*/
 survey/out/
+dryrun/*.log
