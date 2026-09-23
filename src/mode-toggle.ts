@@ -2,7 +2,7 @@
 //
 // The element renders SEMANTICS and no styles: a radiogroup of two radios, and
 // a machine pane it fills on first use. The flavor is a stylesheet keyed on
-// its classes and on html[data-mode], so the same element is a floating pill on
+// its classes and on html[data-robo-vision-mode], so the same element is a floating pill on
 // one site and an XP toolbar toggle on another (see xp.css).
 //
 //   <mode-toggle for="machine-pane"></mode-toggle>
@@ -82,7 +82,7 @@ export class ModeToggle extends HTMLElement {
   async #fill() {
     const pane = this.pane;
     if (!pane || pane.dataset.filled) return;
-    pane.hidden = false;
+    this.#show(pane, true);
     pane.setAttribute("aria-busy", "true");
     pane.replaceChildren(Object.assign(document.createElement("p"), { className: "mv__loading", textContent: "Reading the machine copy…" }));
     let copy: MachineCopy;
@@ -106,7 +106,32 @@ export class ModeToggle extends HTMLElement {
       b.tabIndex = on ? 0 : -1;
     }
     const pane = this.pane;
-    if (pane) pane.hidden = mode !== "machine";
+    if (pane) this.#show(pane, mode === "machine");
+  }
+
+  // A pane marked popover="manual" lives in the browser's TOP LAYER, which no
+  // z-index on the page can reach. The dry run is why: on allbirds.com an
+  // Attentive signup iframe sat over a z-index 2147483646 overlay, and a bigger
+  // number was never going to be the answer.
+  #show(pane: HTMLElement, on: boolean) {
+    pane.hidden = !on;
+    if (!pane.hasAttribute("popover") || !("showPopover" in pane)) return;
+    const open = pane.matches(":popover-open");
+    if (on && !open) {
+      pane.showPopover();
+      this.#raiseDock();
+    } else if (!on && open) pane.hidePopover();
+  }
+
+  // top-layer order is show order, so a dock shown before the pane ends up
+  // UNDER it; re-showing puts it back on top without losing focus
+  #raiseDock() {
+    const dock = this.closest<HTMLElement>("[popover]");
+    if (!dock?.matches(":popover-open")) return;
+    const focused = document.activeElement;
+    dock.hidePopover();
+    dock.showPopover();
+    if (focused instanceof HTMLElement && dock.contains(focused)) focused.focus();
   }
 }
 
@@ -137,7 +162,7 @@ function renderPane(copy: MachineCopy): DocumentFragment {
   const ol = el("ol", "mv__attempts");
   for (const a of copy.attempts) {
     const li = el("li", a.hit ? "is-hit" : "is-miss");
-    li.append(el("b", "", a.step), document.createTextNode(` ${a.url ? new URL(a.url).pathname : ""} `), el("span", "", a.reason));
+    li.append(el("b", "", a.step), document.createTextNode(` ${a.url ? new URL(a.url).pathname : ""} `), el("span", "", a.reason + (a.ms != null ? `, ${a.ms} ms` : "")));
     ol.append(li);
   }
   how.append(ol);

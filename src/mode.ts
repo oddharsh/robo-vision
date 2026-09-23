@@ -2,21 +2,29 @@
 // machine, made generic: one attribute on <html>, one storage key, and an
 // inline snippet that applies the stored mode before first paint.
 //
+// Every name is namespaced, and the dry run is why. The first version used
+// Cloudflare's own spelling, <html data-mode>, and on docs.claude.com that is
+// the THEME attribute ("system"), so toggling robo-vision reset the site's dark
+// mode; on cloudflare.com/connect/ it is Cloudflare's own toggle, so ours drove
+// theirs. `?mode=` has the same problem in the URL. A library that lands on
+// pages it did not write owns no generic name.
+//
 // It owns STATE only. What "machine mode" looks like is the presenter's job,
 // which is what lets one core drive Parallel's restyle, Kong's link rendering
-// and Cloudflare's sibling region alike: each is CSS keyed on html[data-mode].
+// and Cloudflare's sibling region alike: each is CSS keyed on html[data-robo-vision-mode].
 
 export type Mode = "human" | "machine";
 
-export const ATTR = "data-mode";
+export const ATTR = "data-robo-vision-mode";
 export const KEY = "robo-vision:mode";
-export const EVENT = "modechange";
+export const EVENT = "robo-vision:modechange";
+export const PARAM = "robo-vision";
 
 const valid = (m: unknown): m is Mode => m === "human" || m === "machine";
 
-/** a URL wins over storage, so a machine view can be linked to */
+/** a URL wins over storage, so a machine view can be linked to: ?robo-vision=machine */
 function fromUrl(): Mode | null {
-  const m = new URL(location.href).searchParams.get("mode");
+  const m = new URL(location.href).searchParams.get(PARAM);
   return valid(m) ? m : null;
 }
 
@@ -54,9 +62,9 @@ export function initMode(): Mode {
 }
 
 /**
- * Inline this in <head>, before any stylesheet that keys on data-mode. It is
+ * Inline this in <head>, before any stylesheet that keys on the attribute. It is
  * the only piece that must be synchronous: a deferred module would paint the
  * human page first and then swap, which is the flash Cloudflare's own snippet
  * exists to prevent. Stringified so a build can hash it for CSP.
  */
-export const PREPAINT = `(function(){try{var q=new URLSearchParams(location.search).get("mode"),m=q||localStorage.getItem(${JSON.stringify(KEY)});if(m==="machine"||m==="human")document.documentElement.setAttribute(${JSON.stringify(ATTR)},m)}catch(e){}})();`;
+export const PREPAINT = `(function(){try{var q=new URLSearchParams(location.search).get(${JSON.stringify(PARAM)}),m=q||localStorage.getItem(${JSON.stringify(KEY)});if(m==="machine"||m==="human")document.documentElement.setAttribute(${JSON.stringify(ATTR)},m)}catch(e){}})();`;

@@ -24,6 +24,8 @@ export interface Attempt {
   url: string | null;
   hit: boolean;
   reason: string;
+  /** wall time this step took, so a slow door is visible in the pane */
+  ms?: number;
 }
 
 export interface MachineCopy {
@@ -71,8 +73,13 @@ export function rejectReason(res: Response, body: string, url: string): string |
   if (!MARKDOWN_TYPES.has(type) && !(type === "text/plain" && isMdPath)) {
     return type ? `answered ${type}` : "no content-type";
   }
-  // a typed-right response can still be a document: sniff before believing it
-  if (/^\s*<(?:!doctype|html|head|body)\b/i.test(body.slice(0, 512))) return "labelled Markdown, body is HTML";
+  // a typed-right response can still be a document: sniff before believing it.
+  // Skip a BOM and any leading comments first: Shopify storefronts answer
+  // Accept: text/markdown with `text/markdown` over the full HTML page, and a
+  // theme that opens with <!-- BRAND --> put 664 KB of markup past a sniff
+  // that only looked at the first tag (allbirds.com, 2026-09-23)
+  const lead = body.slice(0, 4096).replace(/^\uFEFF/, "").replace(/^(?:\s*<!--[\s\S]*?-->)*\s*/, "");
+  if (/^<(?:!doctype|html|head|body)\b/i.test(lead)) return "labelled Markdown, body is HTML";
   if (!body.trim()) return "empty body";
   return null;
 }
@@ -98,17 +105,20 @@ export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions =
   const done = (step: Step, served: boolean, url: string | null, contentType: string | null, text: string): MachineCopy =>
     ({ step, served, url, contentType, text, attempts });
 
+  const now = () => globalThis.performance?.now() ?? Date.now();
   const tryFetch = async (step: Step, url: string, init: RequestInit): Promise<MachineCopy | null> => {
+    const t0 = now();
     let res: Response;
+    let body: string;
     try {
       res = await f(url, init);
+      body = await res.text();
     } catch (e) {
-      attempts.push({ step, url, hit: false, reason: `fetch failed: ${(e as Error).message}` });
+      attempts.push({ step, url, hit: false, reason: `fetch failed: ${(e as Error).message}`, ms: Math.round(now() - t0) });
       return null;
     }
-    const body = await res.text();
     const why = rejectReason(res, body, res.url || url);
-    attempts.push({ step, url, hit: !why, reason: why ?? `${res.headers.get("content-type")}, ${body.length} chars` });
+    attempts.push({ step, url, hit: !why, reason: why ?? `${res.headers.get("content-type")}, ${body.length} chars`, ms: Math.round(now() - t0) });
     return why ? null : done(step, true, res.url || url, res.headers.get("content-type"), body);
   };
 
@@ -152,8 +162,9 @@ export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions =
   }
 
   if (!skip.has("generated") && opts.generate) {
+    const t0 = now();
     const text = await opts.generate();
-    attempts.push({ step: "generated", url: null, hit: true, reason: `${text.length} chars from the live DOM` });
+    attempts.push({ step: "generated", url: null, hit: true, reason: `${text.length} chars from the live DOM`, ms: Math.round(now() - t0) });
     return done("generated", false, null, null, text);
   }
 

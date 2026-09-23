@@ -55,6 +55,18 @@ test("a Markdown content-type over an HTML body is still refused", async () => {
   expect(c.attempts.find((a) => a.step === "negotiated")!.reason).toBe("labelled Markdown, body is HTML");
 });
 
+test("HTML behind a leading comment and BOM is still HTML", async () => {
+  // allbirds.com (Shopify), 2026-09-23: text/markdown over the whole storefront
+  const { f } = origin({ "md /docs/page": { type: "text/markdown", body: "\uFEFF<!--\nDNAM BRANDS\n-->\n<!doctype html>\n<html>" } });
+  const c = await resolveMachineCopy(PAGE, { fetch: f, facts: { alternates: [], inPage: null }, generate: () => "gen" });
+  expect(c.attempts.find((a) => a.step === "negotiated")!.reason).toBe("labelled Markdown, body is HTML");
+});
+
+test("Markdown that merely starts with a comment is kept", async () => {
+  const { f } = origin({ "md /docs/page": { type: "text/markdown", body: "<!-- generated -->\n# Title\n" } });
+  expect((await resolveMachineCopy(PAGE, { fetch: f, facts: { alternates: [], inPage: null } })).step).toBe("negotiated");
+});
+
 test("text/plain is accepted at a .md URL and nowhere else", async () => {
   const plain = { type: "text/plain", body: MD };
   const a = origin({ "md /docs/page.md": plain });

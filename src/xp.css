@@ -1,5 +1,5 @@
 /* xp.css: the Luna flavor of <mode-toggle> and its machine pane.
-   Everything here is a skin over classes and html[data-mode]; delete this file
+   Everything here is a skin over classes and html[data-robo-vision-mode]; delete this file
    and the element still works, unstyled. Tokens come from the aadhar.sh design
    system (colors, bevels, typography), nothing is hardcoded that a token covers.
 
@@ -9,7 +9,7 @@
    of the same control, and the design brief rules that out by name. */
 
 /* ---- the swap ----------------------------------------------------------- */
-html[data-mode="machine"] [data-human-only] { display: none; }
+html[data-robo-vision-mode="machine"] [data-human-only] { display: none; }
 [data-machine-view][hidden] { display: none; }
 
 /* ---- toolbar toggle pair ------------------------------------------------ */
@@ -20,6 +20,18 @@ html[data-mode="machine"] [data-human-only] { display: none; }
   font: var(--text-ui) / var(--leading-ui) var(--font-ui);
 }
 .mt__btn {
+  /* stated rather than inherited from the UA: a host page's `* { box-sizing:
+     content-box }` shrank this button 24px to 18px on apple.com, and a Tailwind
+     preflight or a `button {}` reset reaches the rest */
+  box-sizing: border-box;
+  appearance: none;
+  margin: 0;
+  height: auto;
+  vertical-align: middle;
+  text-align: center;
+  text-transform: none;
+  letter-spacing: normal;
+  text-decoration: none;
   font: inherit;
   color: var(--ink);
   min-width: 64px;

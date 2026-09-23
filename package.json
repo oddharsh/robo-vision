@@ -9,5 +9,8 @@
     "test": "bun test",
     "demo": "bun demo/serve.ts 8841",
     "probe": "bun probe.ts"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
   }
 }
