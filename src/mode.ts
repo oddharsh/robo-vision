@@ -19,6 +19,26 @@ export const ATTR = "data-robo-vision-mode";
 export const KEY = "robo-vision:mode";
 export const EVENT = "robo-vision:modechange";
 export const PARAM = "robo-vision";
+/** the negotiation cache-buster (source.ts); stripped wherever a URL is a key */
+export const BUST_PARAM = "_rv";
+
+/** one page, one key: no fragment, and none of robo-vision's own params */
+export function pageKey(url: string): string {
+  const u = new URL(url, location.href);
+  u.hash = "";
+  u.searchParams.delete(PARAM);
+  u.searchParams.delete(BUST_PARAM);
+  return u.href;
+}
+
+/** the same URL, carrying the mode the way Parallel's /ai prefix does: a
+ *  reload, a back button or a pasted link stays in machine view */
+export function withMode(url: string, mode: Mode): string {
+  const u = new URL(url, location.href);
+  if (mode === "machine") u.searchParams.set(PARAM, "machine");
+  else u.searchParams.delete(PARAM);
+  return u.href;
+}
 
 const valid = (m: unknown): m is Mode => m === "human" || m === "machine";
 

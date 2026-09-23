@@ -248,7 +248,8 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
       const pre = p.querySelector("pre");
       const r = p.getBoundingClientRect();
       return {
-        mode: document.documentElement.getAttribute("data-mode"),
+        mode: document.documentElement.getAttribute("data-robo-vision-mode"),
+        address: location.href,
         step: p.dataset.filled ?? null,
         error: p.querySelector(".mv__error")?.textContent ?? null,
         status: [...p.querySelectorAll(".mv__cell")].map((c) => c.textContent),

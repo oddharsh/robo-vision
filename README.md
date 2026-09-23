@@ -9,8 +9,10 @@ src/generate.ts     last resort: live DOM to Markdown
 src/mode.ts         headless state: html[data-mode], storage, ?mode=, PREPAINT
 src/mode-toggle.ts  <mode-toggle>, semantics only
 src/xp.css          the Luna flavor (toolbar toggle pair, sunken well, status bar)
+src/copies.ts       the data layer: a copy for any same-origin URL, no rendering
+src/view.ts         the lazy half: renderPane(), plus copies.ts re-exported
 src/drop-in.ts      zero-markup mode: a docked toggle and a top-layer overlay
-scripts/build.ts    dist/robo-vision.dropin.js, one IIFE with its skin inside
+scripts/build.ts    dist/robo-vision.js (+ chunks/) lazy, dist/robo-vision.eager.js single file
 demo/serve.ts       six server behaviours, one page       bun demo/serve.ts 8841
 probe.ts            the resolver against live sites      bun probe.ts <url>...
 dryrun/             drop robo-vision into 34 live sites in real Chrome
@@ -88,6 +90,29 @@ Where the 34 got their copy: 12 served Markdown (declared, negotiated or
 because it omits `Vary: Accept`, so its edge cache hands back whichever
 representation it stored last. The cache-buster below fixed it.
 
+## Staying in machine view
+
+Machine mode lives in the address as `?robo-vision=machine`, the way
+Parallel's machine view lives under `/ai/`, so a reload, the back button and a
+pasted link all keep it. What differs is what a link costs. On Parallel a link
+in machine view is a full page load (a new document plus route-data fetches).
+Here a same-origin link in the pane fetches that page's copy and nothing else,
+draws it, and moves the address with `pushState`:
+
+| following one link | in the pane | normal page load |
+|---|--:|--:|
+| developers.cloudflare.com | 1 request, 8,590 B, 175 ms | 44 requests, 1,301,050 B, 621 ms |
+| parallel.ai | 1 request, 9,259 B (+ a favicon, 2 ad pixels) | 94 requests, 8,258,734 B |
+
+Fetching and rendering are separate modules. `copies.ts` returns a copy for
+any same-origin URL without loading or drawing it, caches by URL, and
+remembers which step this origin serves copies by, so after one `.md` hit the
+next page is asked for its `.md` first. `renderPane()` draws a copy and never
+fetches. They meet only at a link: hovering it fetches, clicking renders. A
+page that serves no copy is loaded for real, still carrying the param, and
+generates from its own DOM. Back and forward re-render from the cache; on
+Parallel, Cloudflare's docs and react.dev, Back caused no reload.
+
 ## Known costs
 
 - a site with nothing published costs up to 3 requests before generating
@@ -98,5 +123,7 @@ representation it stored last. The cache-buster below fixed it.
   treating it as hidden would drop every fade-in-on-scroll section instead
 - closed shadow roots are invisible to any script, so their content is lost
 - the machine view needs the network on first toggle
+- in-pane navigation fires a site's own history listeners: Cloudflare's docs
+  and Parallel sent their analytics beacons, which count it as a page view
 - open call: in-page ranks above a served twin, so an author's hand-written
   region wins over what agents get

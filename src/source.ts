@@ -19,6 +19,8 @@
 // answering /anything.md with the app shell. Neither is a twin, and treating
 // either as one would show a human "what the machine sees" as a page of markup.
 
+import { BUST_PARAM } from "./mode.ts";
+
 export type Step = "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated";
 
 export interface Attempt {
@@ -65,7 +67,7 @@ export interface ResolveOptions {
 }
 
 /** the throwaway param; a name no page plausibly reads, so the origin ignores it */
-export const BUST_PARAM = "_rv";
+export { BUST_PARAM };
 
 const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown"]);
 

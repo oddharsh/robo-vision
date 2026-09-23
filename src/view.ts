@@ -6,11 +6,16 @@
 // of the JavaScript, and the toggle that imports it is a few hundred bytes of
 // state. <mode-toggle> starts the import on hover or focus, so by the time a
 // click lands the code is usually already here.
+//
+// Fetching and rendering stay apart. copies.ts gets a copy for a URL and never
+// touches the DOM; renderPane() draws one and never fetches. The only place
+// they meet is a link in the pane: hovering fetches that page's copy, clicking
+// hands the URL back to the toggle, which decides how to show it.
 
-import { resolveMachineCopy, factsFromDocument, type MachineCopy, type Step } from "./source.ts";
-import { generateMarkdown } from "./generate.ts";
+import type { MachineCopy, Step } from "./source.ts";
 
-export type { MachineCopy };
+export { copyFor, copyForThisPage, type MachineCopy } from "./copies.ts";
+import { copyFor } from "./copies.ts";
 
 const STEP_LABEL: Record<Step, string> = {
   "in-page": "the page's own machine region",
@@ -20,12 +25,11 @@ const STEP_LABEL: Record<Step, string> = {
   "generated": "generated here from the live page",
 };
 
-/** find (or, last, generate) the copy for the page this runs on */
-export function resolve(opts: { exclude?: string[] } = {}): Promise<MachineCopy> {
-  return resolveMachineCopy(location.href, {
-    facts: factsFromDocument(document),
-    generate: () => generateMarkdown(document, { exclude: opts.exclude }),
-  });
+export interface RenderOptions {
+  /** the page this copy describes; relative links resolve against it */
+  page: string;
+  /** a same-origin link was followed inside the pane */
+  navigate?: (url: string) => void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -35,10 +39,50 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: s
   return e;
 }
 
-export function renderPane(copy: MachineCopy): DocumentFragment {
+// Markdown link targets and bare URLs become anchors; every other character
+// stays the text it was, so the well's textContent is still exactly the copy
+const LINK = /\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)|\bhttps?:\/\/[^\s<>()[\]"'`]+/g;
+
+function linkify(text: string, opts: RenderOptions): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  for (const m of text.matchAll(LINK)) {
+    const target = m[1] ?? m[0].replace(/[.,;:!?]+$/, "");
+    if (target.startsWith("#")) continue; // an anchor on a page the pane is not showing
+    let url: URL;
+    try { url = new URL(target, opts.page); } catch { continue; }
+    if (!/^https?:$/.test(url.protocol)) continue;
+    const at = m.index! + m[0].indexOf(target);
+    frag.append(text.slice(last, at));
+    const a = el("a", "mv__link", target);
+    a.href = url.href;
+    if (url.origin === location.origin && opts.navigate) wireSameOrigin(a, url.href, opts.navigate);
+    frag.append(a);
+    last = at + target.length;
+  }
+  frag.append(text.slice(last));
+  return frag;
+}
+
+function wireSameOrigin(a: HTMLAnchorElement, url: string, navigate: (url: string) => void) {
+  // intent fetches; only a click renders. A short dwell keeps a pointer that
+  // merely crosses the link from costing the site a request.
+  let timer = 0;
+  a.addEventListener("pointerenter", () => { timer = window.setTimeout(() => void copyFor(url), 80); });
+  a.addEventListener("pointerleave", () => clearTimeout(timer));
+  a.addEventListener("focus", () => void copyFor(url));
+  a.addEventListener("click", (e) => {
+    // a modified click means a new tab or window: the browser's job, not ours
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    navigate(url);
+  });
+}
+
+export function renderPane(copy: MachineCopy, opts: RenderOptions): DocumentFragment {
   const frag = document.createDocumentFragment();
   const well = el("pre", "mv__well");
-  well.textContent = copy.text; // text, never HTML: this is somebody's Markdown
+  well.append(linkify(copy.text, opts)); // text nodes and anchors, never parsed HTML
   well.tabIndex = 0; // a scrollable region has to be reachable by keyboard
   well.setAttribute("aria-label", "Machine copy");
 
