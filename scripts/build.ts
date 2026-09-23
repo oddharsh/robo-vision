@@ -33,7 +33,14 @@ async function minifyCss(name: string, parts: string[]): Promise<string> {
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 
-const tokens = (await Promise.all(["demo/fonts.css", "demo/colors.css", "demo/typography.css", "demo/bevels.css"].map(read)))
+// fonts.css is left out on purpose. Its @font-face rules cannot be scoped the
+// way custom properties can, so adopting them redefined "Tahoma", "Verdana",
+// "Trebuchet MS" and "Courier New" for the WHOLE host page: aadhar.sh, which
+// sets its text in those families, went from CLS 0.001 to 0.168 with the dock
+// mounted (5 of 5 runs, 2026-09-23). The design system marks them reference-
+// only for the same reason; the font stacks in typography.css name the same
+// system fonts and need no declaration to use them.
+const tokens = (await Promise.all(["demo/colors.css", "demo/typography.css", "demo/bevels.css"].map(read)))
   .join("\n")
   .replace(/:root\b/g, ":where([data-robo-vision])");
 await Bun.write(`${dist}.tmp/tokens.css`, tokens);

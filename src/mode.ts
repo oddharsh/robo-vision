@@ -57,6 +57,11 @@ function fromStorage(): Mode | null {
   }
 }
 
+/** what this visit asked for before anything ran: the URL, then storage */
+export function requestedMode(): Mode | null {
+  return fromUrl() ?? fromStorage();
+}
+
 export function getMode(): Mode {
   const m = document.documentElement.getAttribute(ATTR);
   return valid(m) ? m : "human";
