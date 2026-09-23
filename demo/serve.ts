@@ -51,8 +51,10 @@ const page = (c: Case) => `<!doctype html>
 <script>${PREPAINT}</script>
 ${c === "declared" ? `<link rel="alternate" type="text/markdown" href="/twins/declared-copy.md">` : ""}
 <link rel="stylesheet" href="/demo.css">
-<link rel="stylesheet" href="/xp.css">
-<link rel="stylesheet" href="/xp-pane.css">
+<link rel="stylesheet" href="/base.css">
+<link rel="stylesheet" href="/base-pane.css">
+<link rel="stylesheet" href="/skins/xp.css">
+<link rel="stylesheet" href="/skins/xp-pane.css">
 </head>
 <body>
 <div class="ds-window">
@@ -113,7 +115,8 @@ const server = Bun.serve({
     const accept = req.headers.get("accept") ?? "";
     if (pathname === "/") return Response.redirect(`/bare`, 302);
     if (js.has(pathname)) return new Response(js.get(pathname), { headers: { "content-type": "text/javascript" } });
-    if (pathname === "/xp.css" || pathname === "/xp-pane.css") return new Response(Bun.file(`${here}../src${pathname}`));
+    if (pathname === "/base.css" || pathname === "/base-pane.css") return new Response(Bun.file(`${here}../src${pathname}`));
+    if (pathname.startsWith("/skins/")) return new Response(Bun.file(`${here}..${pathname}`));
     if (pathname === "/demo.css") return new Response(Bun.file(`${here}demo.css`));
     if (/^\/[a-z]+\.css$/.test(pathname)) return new Response(Bun.file(`${here}${pathname.slice(1)}`));
 

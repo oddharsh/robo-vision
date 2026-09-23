@@ -1,0 +1,17 @@
+/* xp-dock.css: the XP look for drop-in mode's dock and overlay. Placement,
+   the box model and the popover resets are base.css's; this is paint only. */
+
+.rv-dock {
+  padding: 2px;
+  background: var(--face);
+  border: 1px solid;
+  border-color: var(--highlight) var(--darkshadow) var(--darkshadow) var(--highlight);
+  border-radius: 0;
+  box-shadow: var(--bevel-raised), var(--shadow-tip);
+}
+.rv-overlay {
+  padding: var(--space-6) var(--space-6) 56px;
+  background: var(--surface-desktop);
+  color: var(--ink);
+}
+.rv-overlay .mv__well { max-height: none; min-height: 60vh; }

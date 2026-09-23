@@ -5,7 +5,7 @@
 // its classes and on html[data-robo-vision-mode], so the same element is a floating pill on
 // one site and an XP toolbar toggle on another (see xp.css).
 //
-//   <mode-toggle for="machine-pane"></mode-toggle>
+//   <mode-toggle for="machine-pane" human-label="Human" machine-label="Agent"></mode-toggle>
 //   <div data-human-only>...the page...</div>
 //   <section id="machine-pane" data-machine-view hidden></section>
 //
@@ -47,13 +47,17 @@ export class ModeToggle extends HTMLElement {
     this.setAttribute("aria-label", this.getAttribute("label") ?? "View mode");
     this.classList.add("mt");
     this.#buttons = (["human", "machine"] as Mode[]).map((mode) => {
+      // no type attribute: these never sit in a form, and Tailwind's preflight
+      // (and resets like it) target [type='button'], whose attribute
+      // specificity would outrank base.css's one-element rules
       const b = document.createElement("button");
-      b.type = "button";
       b.className = "mt__btn";
       b.dataset.mode = mode;
       b.setAttribute("role", "radio");
-      b.textContent = mode === "human" ? "Human" : "Machine";
-      b.title = mode === "human" ? "The page as designed" : "What an agent reads";
+      // labels are the site's to choose: Parallel says HUMAN / MACHINE, CData
+      // HUMAN / AGENT, ai-sdk "For humans" / "For agents"
+      b.textContent = this.getAttribute(`${mode}-label`) ?? (mode === "human" ? "Human" : "Machine");
+      b.title = this.getAttribute(`${mode}-title`) ?? (mode === "human" ? "The page as designed" : "What an agent reads");
       b.addEventListener("click", () => this.choose(mode));
       return b;
     });

@@ -125,6 +125,8 @@ async function baseline() {
   const page = await b.newPage({ viewport: { width: 1280, height: 900 } });
   await page.setContent("<!doctype html><html><head><title>baseline</title></head><body><main><p>x</p></main></body></html>");
   await page.evaluate(eager);
+  // it mounts on idle now, so wait for it rather than read an empty page
+  await page.waitForSelector("[data-robo-vision] .mt__btn");
   const s = await styleOf(page);
   await b.close();
   return s!;
@@ -191,6 +193,7 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
       r.load = refused ? "eager: script-src refuses a same-origin path" : "eager: module script did not mount";
       try {
         await page.evaluate(eager);
+        await page.waitForFunction(() => !!document.querySelector("[data-robo-vision] .mt__btn"), null, { timeout: 8_000 }).catch(() => {});
       } catch (e) {
         find(`inject threw: ${(e as Error).message.split("\n")[0].slice(0, 160)}`);
       }

@@ -151,6 +151,16 @@ test("suffix spellings follow the llms.txt proposal", () => {
   expect(suffixCandidates("https://x.test/a.md")).toEqual([]);
 });
 
+test("a page with no http address skips straight to generation", async () => {
+  // about:blank used to throw out of suffixCandidates, so the pane showed an
+  // error instead of the page's own content
+  const { f, seen } = origin({});
+  const c = await resolveMachineCopy("about:blank", { fetch: f, facts: { alternates: ["/twin.md"], inPage: null }, generate: () => "gen" });
+  expect(c.step).toBe("generated");
+  expect(seen).toEqual([]);
+  expect(suffixCandidates("data:text/html,x")).toEqual([]);
+});
+
 test("rejectReason names the status before anything else", () => {
   expect(rejectReason(new Response("x", { status: 406 }), "x", PAGE)).toBe("HTTP 406");
 });

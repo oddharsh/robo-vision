@@ -99,6 +99,7 @@ export function rejectReason(res: Response, body: string, url: string): string |
 /** the llms.txt-proposal spellings, at most two, cheapest first */
 export function suffixCandidates(pageUrl: string): string[] {
   const u = new URL(pageUrl);
+  if (!/^https?:$/.test(u.protocol)) return []; // about:blank, data:, file: have no .md next to them
   u.hash = "";
   u.search = "";
   const p = u.pathname;
@@ -113,6 +114,8 @@ export function suffixCandidates(pageUrl: string): string[] {
 export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions = {}): Promise<MachineCopy> {
   const f = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const skip = new Set(opts.skip ?? []);
+  // nothing on a non-http page can be fetched; go straight to what the page has
+  if (!/^https?:$/.test(new URL(pageUrl).protocol)) for (const s of ["link-alternate", "negotiated", "md-suffix"] as Step[]) skip.add(s);
   const attempts: Attempt[] = [];
   const done = (step: Step, served: boolean, url: string | null, contentType: string | null, text: string): MachineCopy =>
     ({ step, served, url, contentType, text, attempts });

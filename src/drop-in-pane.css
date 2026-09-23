@@ -1,3 +1,0 @@
-/* drop-in-pane.css: what the overlay needs once the copy is in it. The
-   overlay's own box is in drop-in.css, because it opens before this arrives. */
-.rv-overlay .mv__well { max-height: none; min-height: 60vh; }

@@ -20,6 +20,9 @@ const PAGES: Record<string, string> = {
   "/b": html("Page B", `<p>B as HTML.</p>`),
   "/c": html("Page C", `<p>C serves no Markdown, so it generates.</p>`),
   "/d": html("Page D", `<p>D as HTML.</p>`),
+  // a section that serves no Markdown anywhere
+  "/n/a": html("Nothing A", `<p>No twin here. On to <a href="/n/b">N/B</a>.</p>`),
+  "/n/b": html("Nothing B", `<p>None here either. Over to <a href="/b">B</a>, which has one.</p>`),
 };
 const TWINS: Record<string, string> = {
   "/b.md": `# Page B, the twin\n\nOn to [C](/c) or [D](/d), or [back to A](/a).\n`,
@@ -154,5 +157,33 @@ test("a pasted machine link opens in machine view with no stored preference", as
   await settle(p, "/d");
   expect((await pane(p)).text).toContain("# Page D, the twin");
   expect(await p.evaluate(() => localStorage.getItem("robo-vision:mode"))).toBe(null);
+  await ctx.close();
+});
+
+test("after one miss, the rest of that section generates without asking", async () => {
+  const { ctx, log } = await site();
+  const p = await ctx.newPage();
+  await p.goto(`${O}/n/a?robo-vision=machine`);
+  await settle(p, "/n/a");
+  // the first page of the section pays to find out
+  expect(log.filter((l) => l.startsWith("fetch"))).toEqual(["fetch /n/a", "fetch /n/a.md"]);
+
+  const n = log.length;
+  await Promise.all([p.waitForURL(`${O}/n/b?robo-vision=machine`), p.click(`#robo-vision-pane a.mv__link[href="${O}/n/b"]`)]);
+  await settle(p, "/n/b");
+  // the second pays nothing: no negotiation, no .md, just the page itself
+  expect(since(log, n)).toEqual(["doc /n/b?robo-vision=machine"]);
+  const b = await p.evaluate(() => ({
+    step: (document.querySelector("#robo-vision-pane") as HTMLElement).dataset.filled,
+    how: [...document.querySelectorAll("#robo-vision-pane .mv__attempts li")].map((li) => li.textContent).join(" | "),
+  }));
+  expect(b.step).toBe("generated");
+  expect(b.how).toContain("not asked: /n served no Markdown earlier this session");
+
+  // another section is still asked, and still found
+  const m = log.length;
+  await p.click(`#robo-vision-pane a.mv__link[href="${O}/b"]`);
+  await settle(p, "/b");
+  expect(since(log, m)).toEqual(["fetch /b", "fetch /b.md"]);
   await ctx.close();
 });

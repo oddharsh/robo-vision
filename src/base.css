@@ -1,0 +1,79 @@
+/* base.css: what every robo-vision needs, and as little opinion as works.
+
+   Two tiers, on purpose.
+
+   INTEGRITY: the rules that make it function. Hiding the page in machine
+   view, the overlay's box in the top layer, and a box model a host's global
+   reset cannot change (apple.com's `* { box-sizing: content-box }` shrank the
+   toggle in the dry run). Class selectors, so a site has to mean it.
+
+   LOOK: everything cosmetic, and every selector here has the specificity of
+   ONE ELEMENT (`button:where(.mt__btn)` is 0,0,1). That line is the contract:
+
+     a site's element reset     button { padding: 0 }      0,0,1  ties; ours is
+                                                                  adopted later
+                                                                  and wins
+     a site's universal reset   * { ... }                  0,0,0  loses
+     a site styling robo-vision .mt__btn { ... }           0,1,0  WINS
+
+   A cascade layer was tried first and was too weak: it loses to every
+   unlayered rule, resets included, and 13 of the 34 dry-run sites stripped
+   the toggle's padding with a global `button {}` reset (Tailwind's preflight
+   and friends). The defaults read --rv-* custom properties set on any
+   ancestor, :root included, and fall back to system colors, so the dock
+   follows the site's font and color-scheme instead of bringing a palette. A
+   skin (skins/xp.css is aadhar.sh's) is ordinary CSS on top. */
+
+/* ---- integrity ----------------------------------------------------------- */
+html[data-robo-vision-mode="machine"] [data-human-only] { display: none; }
+[data-machine-view][hidden] { display: none; }
+.mt, .mt__btn, [data-robo-vision], [data-robo-vision] *, [data-robo-vision] *::before, [data-robo-vision] *::after { box-sizing: border-box; }
+.mt__btn { margin: 0; text-transform: none; }
+
+/* [popover] carries UA defaults (inset 0, margin auto, fit-content, a border,
+   Canvas colours); author rules outrank the UA whatever the specificity, so
+   the ones that decide placement are restated here */
+.rv-dock { position: fixed; inset: auto; margin: 0; width: auto; height: auto; overflow: visible; z-index: 2147483647; }
+.rv-dock--bottom-right { right: 12px; bottom: 12px; }
+.rv-dock--bottom-left  { left: 12px;  bottom: 12px; }
+.rv-dock--top-right    { right: 12px; top: 12px; }
+.rv-dock--top-left     { left: 12px;  top: 12px; }
+.rv-overlay { position: fixed; inset: 0; margin: 0; width: auto; height: auto; max-width: none; max-height: none; overflow: auto; z-index: 2147483646; }
+
+/* ---- look: one element's specificity, see above ----------------------------- */
+div:where(.rv-dock) {
+  padding: 3px;
+  border: 1px solid var(--rv-border, color-mix(in srgb, CanvasText 18%, transparent));
+  border-radius: var(--rv-radius, 8px);
+  background: var(--rv-bg, Canvas);
+  color: var(--rv-fg, CanvasText);
+  box-shadow: 0 2px 10px color-mix(in srgb, CanvasText 15%, transparent);
+  font: 13px/1.3 var(--rv-font, system-ui, sans-serif);
+}
+mode-toggle:where(.mt) { display: inline-flex; gap: 2px; }
+button:where(.mt__btn) {
+  appearance: none;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--rv-radius, 8px) - 3px);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+button:where(.mt__btn:hover) { background: color-mix(in srgb, CanvasText 8%, transparent); }
+button:where(.mt__btn[aria-checked="true"]) { background: var(--rv-accent, CanvasText); color: var(--rv-accent-fg, Canvas); }
+button:where(.mt__btn:focus-visible) { outline: 2px solid var(--rv-focus, Highlight); outline-offset: 1px; }
+
+section:where(.rv-overlay) {
+  border: 0;
+  padding: 16px 16px 64px;
+  background: var(--rv-bg, Canvas);
+  color: var(--rv-fg, CanvasText);
+  font: 14px/1.4 var(--rv-font, system-ui, sans-serif);
+}
+p:where(.mv__loading, .mv__error) { margin: 0; padding: 12px; color: var(--rv-muted, GrayText); }
+
+@media (prefers-reduced-motion: no-preference) {
+  button:where(.mt__btn) { transition: background-color 80ms ease-out, color 80ms ease-out; }
+}

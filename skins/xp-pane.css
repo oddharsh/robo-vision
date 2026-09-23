@@ -1,6 +1,5 @@
-/* xp-pane.css: the Luna skin for the machine pane's contents.
-   Loaded with view.ts on first use rather than with the toggle, since nothing
-   in here is on screen until the copy has been found. */
+/* xp-pane.css: the Luna skin for the machine pane's contents. Part of the
+   opt-in XP skin (see xp.css), bundled into the same dist/skins/xp.css. */
 
 [data-machine-view] {
   display: flex;
@@ -9,6 +8,7 @@
   font: var(--text-ui) / var(--leading-ui) var(--font-ui);
 }
 .mv__well {
+  border-radius: 0; /* squared, and stated: base.css rounds it */
   margin: 0;
   min-height: 12em;
   max-height: 60vh;
@@ -27,6 +27,7 @@
 
 /* the XP status bar: sunken cells on the control face */
 .mv__status {
+  color: var(--ink); /* base.css greys it; the Luna bar reads in ink */
   display: flex;
   gap: 2px;
   padding: 2px;

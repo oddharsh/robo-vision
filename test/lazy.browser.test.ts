@@ -20,7 +20,7 @@ beforeAll(async () => {
 afterAll(() => browser?.close());
 
 // every request to the fake origin, in order, as a path
-async function open(stored?: string): Promise<{ page: Page; log: string[] }> {
+async function open(stored?: string, page_ = PAGE): Promise<{ page: Page; log: string[] }> {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const log: string[] = [];
   await ctx.route(`${ORIGIN}/**`, async (route) => {
@@ -32,7 +32,7 @@ async function open(stored?: string): Promise<{ page: Page; log: string[] }> {
         ? route.fulfill({ body: Buffer.from(await file.arrayBuffer()), contentType: "text/javascript" })
         : route.fulfill({ status: 404 });
     }
-    if (path === "/") return route.fulfill({ body: PAGE, contentType: "text/html" });
+    if (path === "/") return route.fulfill({ body: page_, contentType: "text/html" });
     return route.fulfill({ status: 404, body: "" }); // every Markdown probe misses
   });
   if (stored) await ctx.addInitScript(`localStorage.setItem("robo-vision:mode", ${JSON.stringify(stored)})`);
@@ -96,10 +96,12 @@ test("clicking Machine fills the pane from the lazy view", async () => {
     step: (document.querySelector("#robo-vision-pane") as HTMLElement).dataset.filled,
     text: document.querySelector("#robo-vision-pane pre")?.textContent ?? "",
     font: getComputedStyle(document.querySelector("#robo-vision-pane pre")!).fontFamily,
+    wrap: getComputedStyle(document.querySelector("#robo-vision-pane pre")!).whiteSpace,
   }));
   expect(pane.step).toBe("generated");
   expect(pane.text).toContain("# Lazy");
-  expect(pane.font).toContain("Courier"); // the pane's skin arrived with the view
+  expect(pane.font).toContain("monospace"); // the pane's base styles arrived with the view
+  expect(pane.wrap).toBe("pre-wrap");
   await page.context().close();
 });
 
@@ -107,5 +109,48 @@ test("a stored machine mode loads the view straight away", async () => {
   const { page, log } = await open("machine");
   await page.waitForSelector("#robo-vision-pane[data-filled]");
   expect(chunks(log).length).toBeGreaterThan(0);
+  await page.context().close();
+});
+
+test("the site's CSS for our classes wins; its global resets do not", async () => {
+  // base.css's look has one element's specificity: a rule naming our classes
+  // outranks it, an element or universal reset does not. The box-sizing reset
+  // is apple.com's and the button reset is Tailwind's preflight, both from the
+  // dry run.
+  const site = PAGE.replace("<title>lazy</title>", `<title>lazy</title><style>
+    .mt__btn[aria-checked="true"] { background: rgb(255, 0, 0); }
+    .rv-dock { border-radius: 0; }
+    * { box-sizing: content-box; }
+    button, [type="button"] { padding: 0; background-color: transparent; }
+  </style>`);
+  const { page } = await open(undefined, site);
+  const s = await page.evaluate(() => {
+    const on = document.querySelector('[data-robo-vision] .mt__btn[aria-checked="true"]')!;
+    const off = document.querySelector('[data-robo-vision] .mt__btn[aria-checked="false"]')!;
+    return {
+      bg: getComputedStyle(on).backgroundColor,
+      radius: getComputedStyle(document.querySelector(".rv-dock")!).borderRadius,
+      box: getComputedStyle(on).boxSizing,
+      pad: getComputedStyle(off).paddingLeft,
+    };
+  });
+  // a site's element reset (Tailwind's preflight shape) does not strip it
+  expect(s.pad).toBe("10px");
+  expect(s.bg).toBe("rgb(255, 0, 0)");
+  expect(s.radius).toBe("0px");
+  expect(s.box).toBe("border-box"); // integrity is unlayered on purpose
+  await page.context().close();
+});
+
+test("labels and corner come from the script tag", async () => {
+  const site = PAGE.replace('<script type="module" src="/__robo-vision/robo-vision.js">',
+    '<script type="module" src="/__robo-vision/robo-vision.js" data-human-label="Person" data-machine-label="Agent" data-corner="top-left">');
+  const { page } = await open(undefined, site);
+  const s = await page.evaluate(() => ({
+    labels: [...document.querySelectorAll("[data-robo-vision] .mt__btn")].map((b) => b.textContent),
+    corner: document.querySelector(".rv-dock")!.className,
+  }));
+  expect(s.labels).toEqual(["Person", "Agent"]);
+  expect(s.corner).toContain("rv-dock--top-left");
   await page.context().close();
 });

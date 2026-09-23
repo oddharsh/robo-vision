@@ -1,16 +1,13 @@
-/* xp.css: the Luna flavor of <mode-toggle> and its machine pane.
-   Everything here is a skin over classes and html[data-robo-vision-mode]; delete this file
-   and the element still works, unstyled. Tokens come from the aadhar.sh design
-   system (colors, bevels, typography), nothing is hardcoded that a token covers.
+/* xp.css: aadhar.sh's Windows XP "Luna" skin for the toggle. ONE skin, not
+   the default: robo-vision ships a neutral base (src/base.css) and a site opts
+   into this by linking dist/skins/xp.css. It is unlayered, so it sits on top
+   of the base's @layer without any specificity games. Tokens come from the
+   aadhar.sh design system, scoped by the build to robo-vision's own elements.
 
    The toggle is an XP TOOLBAR toggle pair, the WordPad Bold-button idiom: the
    checked button stays DEPRESSED (sunken bevel, pressed face), the other is
    flat until hovered, when it raises. A segmented pill would be the 2020s read
    of the same control, and the design brief rules that out by name. */
-
-/* ---- the swap ----------------------------------------------------------- */
-html[data-robo-vision-mode="machine"] [data-human-only] { display: none; }
-[data-machine-view][hidden] { display: none; }
 
 /* ---- toolbar toggle pair ------------------------------------------------ */
 .mt {

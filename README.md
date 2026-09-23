@@ -8,7 +8,9 @@ src/source.ts       find an existing machine copy; the judgement is rejectReason
 src/generate.ts     last resort: live DOM to Markdown
 src/mode.ts         headless state: html[data-mode], storage, ?mode=, PREPAINT
 src/mode-toggle.ts  <mode-toggle>, semantics only
-src/xp.css          the Luna flavor (toolbar toggle pair, sunken well, status bar)
+src/base.css        the only CSS robo-vision ships: integrity rules, plus a
+                    neutral look in @layer robo-vision that any site CSS beats
+skins/xp*.css       one optional skin (aadhar.sh's XP Luna), built to dist/skins/xp.css
 src/copies.ts       the data layer: a copy for any same-origin URL, no rendering
 src/view.ts         the lazy half: renderPane(), plus copies.ts re-exported
 src/drop-in.ts      zero-markup mode: a docked toggle and a top-layer overlay
@@ -18,6 +20,47 @@ probe.ts            the resolver against live sites      bun probe.ts <url>...
 dryrun/             drop robo-vision into 34 live sites in real Chrome
 test/               bun test (the generator tests drive real Chrome)
 ```
+
+## Add it to a site
+
+```html
+<script type="module" src="/robo-vision/robo-vision.js"
+        data-machine-label="Agent" data-corner="bottom-left"></script>
+```
+
+Host `dist/` at that path. No markup, no inline script or style for a CSP to
+allow (styles are adopted as constructed sheets), no server changes.
+
+It brings no look of its own worth keeping. The base follows the site's font
+and color scheme, reads `--rv-bg`, `--rv-fg`, `--rv-accent`, `--rv-border`,
+`--rv-radius`, `--rv-font`, `--rv-mono` and a few more from any ancestor, and
+sits in `@layer robo-vision`, so a site restyles it by writing ordinary CSS
+for `.rv-dock`, `.mt__btn`, `.mv__well` and friends: no `!important`, no
+specificity games. Only the rules it needs to function are unlayered, so a
+global reset like `* { box-sizing: content-box }` cannot break it. Labels,
+titles and the corner are attributes. A skin is just more CSS:
+
+```html
+<link rel="stylesheet" href="/robo-vision/skins/xp.css">
+```
+
+## Overhead
+
+Measured by A/B on six live sites (aadhar.sh, Cloudflare's docs, Wikipedia,
+Hacker News, react.dev, BBC), five cold loads per arm, the same document with
+and without the script tag:
+
+| stage | cost |
+|---|---|
+| every page view | 1 request, 9,246 B (3.6 KB gzip), mounted after load on idle; +0 to 2 ms script, +1 to 14 ms main thread, CLS unchanged, load and LCP within noise; **no requests to the site** |
+| first hover or focus | 2 requests, the view code, 12.9 KB (5.8 KB gzip) |
+| clicking Machine | 1 to 4 requests to the site, median 267 ms to a served copy; generation itself 2 ms median, 15 ms worst (Wikipedia) |
+| a section serving nothing | its first page pays the lookups; the rest of it, for the session, none |
+| each link followed in the pane | ~1 request, ~9 KB, against 1.3 to 8.3 MB for a normal load |
+
+Main-thread cost is style recalculation, which adding any stylesheet causes
+and which scales with the host's DOM, not with robo-vision's rule count:
+cutting its CSS from 6.9 KB to 1.9 KB saved bytes and no measurable time.
 
 ## Run it
 
@@ -123,6 +166,9 @@ Parallel, Cloudflare's docs and react.dev, Back caused no reload.
   treating it as hidden would drop every fade-in-on-scroll section instead
 - closed shadow roots are invisible to any script, so their content is lost
 - the machine view needs the network on first toggle
+- on a section of a site that serves no Markdown, the first page pays for the
+  lookups (a negotiation and up to two `.md` spellings, each a 404); the rest
+  of that section, for the session, generates without asking
 - in-pane navigation fires a site's own history listeners: Cloudflare's docs
   and Parallel sent their analytics beacons, which count it as a page view
 - open call: in-page ranks above a served twin, so an author's hand-written

@@ -11,7 +11,17 @@ import { requestedMode } from "./mode.ts";
 
 declare const __ROBO_VISION_CSS__: string;
 
-const go = () => dropIn({ css: __ROBO_VISION_CSS__ });
+// configuration rides on the script tag itself, so adopting robo-vision needs
+// no JavaScript of the site's own:
+//   <script type="module" src="/robo-vision/robo-vision.js"
+//           data-corner="bottom-left" data-machine-label="Agent"></script>
+const tag = document.querySelector<HTMLScriptElement>('script[src*="robo-vision"][data-corner], script[src*="robo-vision"][data-human-label], script[src*="robo-vision"][data-machine-label]');
+const cfg = tag?.dataset ?? {};
+const go = () => dropIn({
+  css: __ROBO_VISION_CSS__,
+  corner: cfg.corner as "bottom-right" | "bottom-left" | "top-right" | "top-left" | undefined,
+  labels: { human: cfg.humanLabel, machine: cfg.machineLabel },
+});
 
 const whenBody = () => (document.body ? go() : document.addEventListener("DOMContentLoaded", go, { once: true }));
 const whenIdle = () => {

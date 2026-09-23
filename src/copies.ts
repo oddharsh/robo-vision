@@ -18,6 +18,16 @@
 // Each origin tends to serve every page the same way, so the step that worked
 // last is tried first next time: after one .md hit, the next page is asked for
 // its .md before anything is negotiated.
+//
+// The negative is remembered too. A site that serves no Markdown cost 3 failed
+// requests per page (a negotiation and up to two .md spellings, each a 404 in
+// the site's logs and the console) before generating: median 494 ms to a pane
+// in the dry run, nearly all of it waiting on those misses. After one miss the
+// rest of the SECTION (first path segment) skips straight to generating.
+// Scoped to a section rather than the origin because a site often serves
+// Markdown under /docs/ and nothing on its marketing pages; a miss on / must
+// not stop /docs/ from being asked. A declared alternate is always read, since
+// a declaration is evidence and costs no guess.
 
 import { resolveMachineCopy, factsFromDocument, suffixCandidates, type Attempt, type MachineCopy, type Step } from "./source.ts";
 import { generateMarkdown } from "./generate.ts";
@@ -31,6 +41,21 @@ const FETCHED: Fetched[] = ["negotiated", "md-suffix"];
 const ALL: Step[] = ["in-page", "link-alternate", "negotiated", "md-suffix", "generated"];
 
 const cache = new Map<string, Promise<MachineCopy | null>>();
+
+const section = (url: string) => `robo-vision:none:${new URL(url).pathname.split("/")[1] ?? ""}`;
+function servesNothing(url: string): boolean {
+  try { return sessionStorage.getItem(section(url)) === "1"; } catch { return false; }
+}
+function noteNothing(url: string, nothing: boolean): void {
+  try {
+    if (nothing) sessionStorage.setItem(section(url), "1");
+    else sessionStorage.removeItem(section(url));
+  } catch { /* fine without it */ }
+}
+const skipped = (url: string): Attempt => ({
+  step: "negotiated", url: null, hit: false,
+  reason: `not asked: /${new URL(url).pathname.split("/")[1] ?? ""} served no Markdown earlier this session`,
+});
 
 function preferred(): Fetched[] {
   let memo: string | null = null;
@@ -53,10 +78,19 @@ export function copyForThisPage(page: string, opts: { exclude?: string[] } = {})
   const key = pageKey(page);
   const hit = cache.get(key);
   if (hit) return hit as Promise<MachineCopy>;
+  const guessless = servesNothing(key);
   const p = resolveMachineCopy(key, {
     facts: factsFromDocument(document),
     generate: () => generateMarkdown(document, { exclude: opts.exclude }),
-  }).then((c) => { remember(c, key); return c; });
+    skip: guessless ? ["negotiated", "md-suffix"] : [],
+  }).then((c) => {
+    remember(c, key);
+    if (guessless) c.attempts.splice(2, 0, skipped(key));
+    // only a page that was actually asked can prove the section serves nothing
+    else noteNothing(key, c.step === "generated");
+    if (c.served) noteNothing(key, false);
+    return c;
+  });
   cache.set(key, p);
   return p;
 }
@@ -67,6 +101,9 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
   const hit = cache.get(key);
   if (hit) return hit;
   const p = (async () => {
+    // known empty: skip the requests; the caller loads the page for real and
+    // that page generates without asking either
+    if (servesNothing(key)) return null;
     const tried: Attempt[] = [];
     for (const step of preferred()) {
       try {
@@ -78,6 +115,7 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
         tried.push(...((e as { attempts?: Attempt[] }).attempts ?? []));
       }
     }
+    noteNothing(key, true);
     return null;
   })();
   cache.set(key, p);

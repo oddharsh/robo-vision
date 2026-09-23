@@ -17,8 +17,10 @@ import { adopt } from "./adopt.ts";
 export interface DropInOptions {
   corner?: "bottom-right" | "bottom-left" | "top-right" | "top-left";
   /** CSS for the toggle and the overlay's box, adopted now; the pane's own
-   *  skin arrives later with the view code (drop-in-view.ts) */
+   *  styles arrive later with the view code (drop-in-view.ts) */
   css?: string;
+  /** button text, e.g. { machine: "Agent" }; defaults Human / Machine */
+  labels?: { human?: string; machine?: string };
 }
 
 export const MARK = "data-robo-vision";
@@ -41,6 +43,8 @@ export function dropIn(opts: DropInOptions = {}): { dock: HTMLElement; pane: HTM
   dock.setAttribute(MARK, "dock");
   const toggle = document.createElement("mode-toggle") as ModeToggle;
   toggle.setAttribute("for", pane.id);
+  if (opts.labels?.human) toggle.setAttribute("human-label", opts.labels.human);
+  if (opts.labels?.machine) toggle.setAttribute("machine-label", opts.labels.machine);
   // set before the element connects: a stored machine mode loads the view
   // straight away, and it has to be this loader that does it
   toggle.loadView = () => import("./drop-in-view.ts");
