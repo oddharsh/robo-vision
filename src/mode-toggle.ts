@@ -29,6 +29,8 @@ import { getMode, setMode, initMode, pageKey, withMode, EVENT, PARAM, type Mode 
 
 export type ViewModule = typeof import("./view.ts");
 
+const isMarkdownUrl = (url: string) => new URL(url, location.href).pathname.endsWith(".md");
+
 export class ModeToggle extends HTMLElement {
   /** how the view code arrives; drop-in mode swaps in a loader that also
    *  brings the pane's skin */
@@ -40,6 +42,9 @@ export class ModeToggle extends HTMLElement {
   #document = pageKey(location.href);
   /** the render in flight, so a slow page cannot land over a newer one */
   #showing = "";
+  /** the most recent address that is a real page, for Human to return to
+   *  from a Markdown-only document */
+  #lastPage = pageKey(location.href);
 
   connectedCallback() {
     if (this.#buttons.length) return;
@@ -91,9 +96,17 @@ export class ModeToggle extends HTMLElement {
 
   async choose(mode: Mode) {
     if (mode === "human" && pageKey(location.href) !== this.#document) {
-      // the pane moved to another page; its human view is a real load away
+      // a Markdown-only document has no human page: go back to the last real
+      // one rather than load the file itself as raw text
+      const target = isMarkdownUrl(location.href) ? this.#lastPage : pageKey(location.href);
       setMode("human");
-      location.replace(withMode(location.href, "human"));
+      if (target === this.#document) {
+        // that page is the one still loaded under the pane: no reload needed
+        history.replaceState(history.state, "", withMode(target, "human"));
+        return;
+      }
+      // the pane moved to another page; its human view is a real load away
+      location.replace(withMode(target, "human"));
       return;
     }
     // resolve BEFORE flipping: generation reads computed style, and once the
@@ -106,8 +119,22 @@ export class ModeToggle extends HTMLElement {
 
   /** follow a same-origin link inside the pane */
   async navigate(url: string) {
-    history.pushState({ robo: true }, "", withMode(url, "machine"));
-    await this.#present(url);
+    let address = url;
+    if (isMarkdownUrl(url)) {
+      // a link to a .md file: fetch it and, alongside, ask whether the page it
+      // mirrors exists. Only a verified page goes in the address bar
+      const pane = this.pane;
+      pane?.setAttribute("aria-busy", "true");
+      const view = await this.#loadView();
+      const [page] = await Promise.all([view.humanPageFor(url), view.copyFor(url)]);
+      if (page) {
+        view.alias(page, view.copyFor(url));
+        address = page;
+      }
+    }
+    if (!isMarkdownUrl(address)) this.#lastPage = pageKey(address);
+    history.pushState({ robo: true }, "", withMode(address, "machine"));
+    await this.#present(address);
   }
 
   #opts() {
@@ -131,6 +158,7 @@ export class ModeToggle extends HTMLElement {
   // browser loaded; anything else has to be loaded for real
   #popstate() {
     const url = new URL(location.href);
+    if (!isMarkdownUrl(url.href)) this.#lastPage = pageKey(url.href);
     const machine = url.searchParams.get(PARAM) === "machine";
     const here = pageKey(url.href) === this.#document;
     if (machine) {

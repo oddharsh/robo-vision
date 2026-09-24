@@ -14,8 +14,8 @@
 
 import type { MachineCopy, Step } from "./source.ts";
 
-export { copyFor, copyForThisPage, type MachineCopy } from "./copies.ts";
-import { copyFor } from "./copies.ts";
+export { copyFor, copyForThisPage, humanPageFor, alias, type MachineCopy } from "./copies.ts";
+import { copyFor, humanPageFor } from "./copies.ts";
 
 const STEP_LABEL: Record<Step, string> = {
   "in-page": "the page's own machine region",
@@ -23,6 +23,7 @@ const STEP_LABEL: Record<Step, string> = {
   "negotiated": "same URL, Accept: text/markdown",
   "md-suffix": ".md next to the page",
   "generated": "generated here from the live page",
+  "md-link": "a .md file, linked from the last copy",
 };
 
 export interface RenderOptions {
@@ -68,9 +69,12 @@ function wireSameOrigin(a: HTMLAnchorElement, url: string, navigate: (url: strin
   // intent fetches; only a click renders. A short dwell keeps a pointer that
   // merely crosses the link from costing the site a request.
   let timer = 0;
-  a.addEventListener("pointerenter", () => { timer = window.setTimeout(() => void copyFor(url), 80); });
+  // a .md link also has its page verified early, so the click can go straight
+  // to the right address
+  const fetchAhead = () => { void copyFor(url); if (new URL(url).pathname.endsWith(".md")) void humanPageFor(url); };
+  a.addEventListener("pointerenter", () => { timer = window.setTimeout(fetchAhead, 80); });
   a.addEventListener("pointerleave", () => clearTimeout(timer));
-  a.addEventListener("focus", () => void copyFor(url));
+  a.addEventListener("focus", fetchAhead);
   a.addEventListener("click", (e) => {
     // a modified click means a new tab or window: the browser's job, not ours
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

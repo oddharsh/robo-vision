@@ -161,6 +161,17 @@ page that serves no copy is loaded for real, still carrying the param, and
 generates from its own DOM. Back and forward re-render from the cache; on
 Parallel, Cloudflare's docs and react.dev, Back caused no reload.
 
+Some sites link one Markdown file to another (Stripe's copies point at
+`/checkout/quickstart.md`, not `/checkout/quickstart`). Left in the address
+bar, a `.md` URL strands a reload or the Human button on a raw text file with
+no toggle. So a `.md` link is fetched as it is and, alongside, one `HEAD`
+asks whether the page it mirrors exists (`/x.md` to `/x`, `/index.md` to
+`/`). A 200 that is HTML puts that page in the address bar: Stripe's six
+links all pass. Anything else keeps the `.md` address, and Human returns to
+the last real page instead: nuxt.com's `/design.md` and `/sitemap.md` are
+Markdown-only, and their stripped URLs are 404s. A reload on a Markdown-only
+file still shows it as raw text, since there is no page to fall back to.
+
 ## Known costs
 
 - a site with nothing published costs up to 3 requests before generating

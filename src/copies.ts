@@ -95,11 +95,25 @@ export function copyForThisPage(page: string, opts: { exclude?: string[] } = {})
   return p;
 }
 
+const isMarkdownUrl = (url: string) => new URL(url).pathname.endsWith(".md");
+
 /** another same-origin page, fetched and never rendered; null if it serves nothing */
 export function copyFor(url: string): Promise<MachineCopy | null> {
   const key = pageKey(url);
   const hit = cache.get(key);
   if (hit) return hit;
+  if (isMarkdownUrl(key)) {
+    // a link straight to a .md file (Stripe's Markdown links to its other
+    // pages this way): read it as the Markdown it says it is, outside the
+    // per-origin strategy memory, since it says nothing about how the site
+    // serves copies for its ordinary page URLs
+    const p = resolveMachineCopy(key, { facts: { alternates: [key], inPage: null }, skip: ["in-page", "negotiated", "md-suffix", "generated"] })
+      .then((c): MachineCopy => ({ ...c, step: "md-link", attempts: c.attempts.filter((a) => a.url).map((a) => ({ ...a, step: "md-link" })) }))
+      .catch(() => null);
+    cache.set(key, p);
+    p.then((c) => { if (!c) cache.delete(key); });
+    return p;
+  }
   const p = (async () => {
     // known empty: skip the requests; the caller loads the page for real and
     // that page generates without asking either
@@ -122,4 +136,59 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
   // a miss is not remembered past this page: the next load may serve it
   p.then((c) => { if (!c) cache.delete(key); });
   return p;
+}
+
+// ---- the page a Markdown file mirrors ------------------------------------
+//
+// Following a .md link used to leave that .md URL in the address bar, and a
+// reload or the Human button then loaded the file itself: Chrome shows it as
+// raw text, robo-vision is not on it, and there is no way back. Stripping the
+// suffix fixes that where the .md mirrors a page (Stripe: 6 of 6 links, and
+// Cloudflare's docs) and breaks it where the file is Markdown-only (nuxt.com's
+// /sitemap.md and /design.md: both stripped URLs are 404s). So the stripped
+// URL is asked about first, and only a 200 that is HTML earns the address bar.
+
+/** "/x.md" -> "/x", by the llms.txt spellings; null if it is not a .md URL */
+export function strippedPage(mdUrl: string): string | null {
+  const u = new URL(mdUrl);
+  const p = u.pathname;
+  if (!p.endsWith(".md")) return null;
+  if (p.endsWith("/index.md")) u.pathname = p.slice(0, -"index.md".length);
+  else if (p === "/.md") u.pathname = "/"; // parallel.ai's root twin
+  else u.pathname = p.slice(0, -".md".length); // also .html.md -> .html
+  return u.href;
+}
+
+const pages = new Map<string, Promise<string | null>>();
+
+/** the verified human page behind a .md URL, or null if there is none */
+export function humanPageFor(mdUrl: string): Promise<string | null> {
+  const key = pageKey(mdUrl);
+  const hit = pages.get(key);
+  if (hit) return hit;
+  const candidate = strippedPage(key);
+  const p = !candidate ? Promise.resolve(null) : (async () => {
+    const ask = async (method: "HEAD" | "GET") => {
+      const r = await fetch(candidate, { method, headers: { accept: "text/html" }, redirect: "follow", cache: "no-store" });
+      if (method === "GET") void r.body?.cancel(); // the status and type are the answer
+      return r;
+    };
+    try {
+      let r = await ask("HEAD");
+      if (r.status === 405 || r.status === 501) r = await ask("GET"); // a server that refuses HEAD
+      const type = (r.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+      if (!r.ok || type !== "text/html") return null;
+      const final = new URL(r.url || candidate);
+      return final.origin === new URL(candidate).origin ? pageKey(final.href) : null;
+    } catch {
+      return null;
+    }
+  })();
+  pages.set(key, p);
+  return p;
+}
+
+/** file a copy under a second address, so reload, back and Human find it there */
+export function alias(pageUrl: string, copy: Promise<MachineCopy | null>): void {
+  cache.set(pageKey(pageUrl), copy);
 }

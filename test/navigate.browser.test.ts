@@ -23,9 +23,13 @@ const PAGES: Record<string, string> = {
   // a section that serves no Markdown anywhere
   "/n/a": html("Nothing A", `<p>No twin here. On to <a href="/n/b">N/B</a>.</p>`),
   "/n/b": html("Nothing B", `<p>None here either. Over to <a href="/b">B</a>, which has one.</p>`),
+  // the page a .md mirrors; /m/only.md mirrors nothing, and /m/only is a 404
+  "/m/mirror": html("Mirror page", `<p>The human page behind /m/mirror.md.</p>`),
 };
 const TWINS: Record<string, string> = {
-  "/b.md": `# Page B, the twin\n\nOn to [C](/c) or [D](/d), or [back to A](/a).\n`,
+  "/b.md": `# Page B, the twin\n\nOn to [C](/c) or [D](/d), or [back to A](/a). Also [a mirror](/m/mirror.md) and [a file](/m/only.md).\n`,
+  "/m/mirror.md": `# Mirror, the twin\n\nBack to [B](/b), or on to [D](/d).\n`,
+  "/m/only.md": `# Only Markdown\n\nNo page stands behind this file.\n`,
   "/d.md": `# Page D, the twin\n\nBack to [B](/b).\n`,
 };
 
@@ -48,7 +52,7 @@ async function site(): Promise<{ ctx: BrowserContext; log: string[] }> {
       return route.fulfill({ body: Buffer.from(await f.arrayBuffer()), contentType: "text/javascript" });
     }
     const md = /markdown/.test(req.headers()["accept"] ?? "");
-    log.push(`${req.resourceType() === "document" ? "doc" : "fetch"} ${path}${url.search}`);
+    log.push(`${req.method() === "HEAD" ? "head" : req.resourceType() === "document" ? "doc" : "fetch"} ${path}${url.search}`);
     if (TWINS[path]) return route.fulfill({ body: TWINS[path], contentType: "text/markdown" });
     // pages answer HTML whatever is asked, and say so honestly with Vary
     if (PAGES[path]) return route.fulfill({ body: PAGES[path], contentType: "text/html", headers: { vary: "Accept" } });
@@ -185,5 +189,56 @@ test("after one miss, the rest of that section generates without asking", async 
   await p.click(`#robo-vision-pane a.mv__link[href="${O}/b"]`);
   await settle(p, "/b");
   expect(since(log, m)).toEqual(["fetch /b", "fetch /b.md"]);
+  await ctx.close();
+});
+
+test("a .md link to a real page puts that page's address in the bar", async () => {
+  const { ctx, log } = await site();
+  const p = await ctx.newPage();
+  await p.goto(`${O}/b?robo-vision=machine`);
+  await settle(p, "/b");
+  const n = log.length;
+  await p.click(`#robo-vision-pane a.mv__link[href="${O}/m/mirror.md"]`);
+  await settle(p, "/m/mirror");
+  expect(p.url()).toBe(`${O}/m/mirror?robo-vision=machine`);
+  const after = since(log, n);
+  expect(after.sort()).toEqual(["fetch /m/mirror.md", "head /m/mirror"]); // the copy, and the check
+  const c = await pane(p);
+  expect(c.text).toContain("# Mirror, the twin");
+  expect(await p.evaluate(() => document.querySelector("#robo-vision-pane .mv__cell")?.textContent)).toBe("a .md file, linked from the last copy");
+
+  // the site's lookup memory is untouched: /d is still asked for its .md first
+  const m = log.length;
+  await p.hover(`#robo-vision-pane a.mv__link[href="${O}/d"]`);
+  await p.waitForTimeout(300);
+  expect(since(log, m)).toEqual(["fetch /d.md"]);
+
+  // and Human now loads the real page instead of a raw .md file
+  await Promise.all([p.waitForURL(`${O}/m/mirror`), p.click('[data-robo-vision] .mt__btn[data-mode="human"]')]);
+  await p.waitForSelector("[data-robo-vision] .mt__btn");
+  expect(await p.evaluate(() => document.querySelector("h1")?.textContent)).toBe("Mirror page");
+  await ctx.close();
+});
+
+test("a .md link with no page behind it keeps its address; Human goes back to a real page", async () => {
+  const { ctx, log } = await site();
+  const p = await ctx.newPage();
+  await p.goto(`${O}/b?robo-vision=machine`);
+  await settle(p, "/b");
+  const n = log.length;
+  await p.click(`#robo-vision-pane a.mv__link[href="${O}/m/only.md"]`);
+  await settle(p, "/m/only.md");
+  expect(p.url()).toBe(`${O}/m/only.md?robo-vision=machine`);
+  expect(since(log, n).sort()).toEqual(["fetch /m/only.md", "head /m/only"]); // /m/only answered 404
+  expect((await pane(p)).text).toContain("# Only Markdown");
+
+  // /b is the document still loaded under the pane, so Human needs no load
+  const m = log.length;
+  await p.click('[data-robo-vision] .mt__btn[data-mode="human"]');
+  await p.waitForFunction(() => document.documentElement.getAttribute("data-robo-vision-mode") === "human");
+  expect(p.url()).toBe(`${O}/b`);
+  expect(await p.evaluate(() => document.querySelector("h1")?.textContent)).toBe("Page B");
+  expect((await pane(p)).open).toBe(false);
+  expect(since(log, m).some((l) => l.startsWith("doc"))).toBe(false);
   await ctx.close();
 });

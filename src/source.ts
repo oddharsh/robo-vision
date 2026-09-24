@@ -21,7 +21,7 @@
 
 import { BUST_PARAM } from "./mode.ts";
 
-export type Step = "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated";
+export type Step = "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated" | "md-link";
 
 export interface Attempt {
   step: Step;
