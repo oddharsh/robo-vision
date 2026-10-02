@@ -2,8 +2,8 @@
 // `robo-vision/resolve` entry, for a CLI, a CI job, a Worker or an agent.
 
 export {
-  resolveMachineCopy, surveyMachineCopies, rejectReason, suffixCandidates, ORDER, BUST_PARAM,
-  type Attempt, type Door, type MachineCopy, type PageFacts, type ResolveOptions, type Step,
+  resolveMachineCopy, surveyMachineCopies, judge, rejectReason, suffixCandidates, ORDER, BUST_PARAM,
+  type Attempt, type Door, type MachineCopy, type PageFacts, type ResolveOptions, type Step, type Verdict,
 } from "./source.ts";
 export { factsFromHtml } from "./facts-html.ts";
 export { checkPage, type CheckOptions, type Finding, type Report, type Severity } from "./check.ts";

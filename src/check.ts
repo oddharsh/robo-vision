@@ -42,7 +42,6 @@ export interface CheckOptions extends Pick<ResolveOptions, "fetch" | "headers" |
 // reasons (a trailing newline, CRLF); only a difference in words is drift
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
 
-const fetched = (a: Attempt) => a.status !== undefined;
 const isHtml = (a: Attempt) => /^text\/html\b/i.test(a.contentType ?? "");
 
 export async function checkPage(url: string, opts: CheckOptions = {}): Promise<Report> {
@@ -80,8 +79,8 @@ export async function checkPage(url: string, opts: CheckOptions = {}): Promise<R
   for (const d of doors) for (const a of d.attempts) {
     // Shopify storefronts answer Accept: text/markdown with the full HTML
     // page under a text/markdown label (allbirds.com, 664 KB)
-    if (a.reason === "labelled Markdown, body is HTML") add("error", "mislabelled-html", `${a.step} answered ${a.contentType} over an HTML body; an agent that trusts the label reads markup as Markdown`, a.url);
-    if (a.reason === "empty body") add("error", "empty-copy", `${a.step} answered a Markdown type with an empty body`, a.url);
+    if (a.verdict === "html-body") add("error", "mislabelled-html", `${a.step} answered ${a.contentType} over an HTML body; an agent that trusts the label reads markup as Markdown`, a.url);
+    if (a.verdict === "empty-body") add("error", "empty-copy", `${a.step} answered a Markdown type with an empty body`, a.url);
   }
 
   // a declaration is a promise: every declared twin should be there
@@ -91,8 +90,8 @@ export async function checkPage(url: string, opts: CheckOptions = {}): Promise<R
 
   const neg = door("negotiated");
   if (neg) {
-    const plain = neg.attempts.find((a) => fetched(a) && !a.note);
-    const busted = neg.attempts.find((a) => fetched(a) && a.note);
+    const plain = neg.attempts.find((a) => a.verdict && !a.busted);
+    const busted = neg.attempts.find((a) => a.busted);
     // webflow.com: Markdown on 1 of 4 plain requests, 4 of 4 past the cache
     if (busted?.hit) add("error", "cache-ignores-accept", "the origin negotiates Markdown, but the cache in front of it answered HTML and the response has no Vary: Accept; agents get whichever representation was cached last", neg.copy?.url);
     else if (plain?.hit && !plain.varies) add("warn", "no-vary-accept", "negotiation answered Markdown without Vary: Accept; a shared cache keyed on the URL can hand that Markdown to a browser, or the HTML to an agent", plain.url);

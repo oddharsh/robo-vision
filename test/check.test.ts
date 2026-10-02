@@ -87,6 +87,16 @@ test("a step skipped with a reason is recorded where it would have run", async (
   expect(c.attempts.map((a) => `${a.step}:${a.reason}`)).toEqual(["in-page:no machine region", "link-alternate:none declared", "negotiated:not asked", "generated:1 chars from the live DOM"]);
 });
 
+test("every fetched attempt carries a verdict a rule can decide on", async () => {
+  const doors = await surveyMachineCopies(PAGE, { facts: { alternates: ["/dead.md"], inPage: null }, fetch: origin({
+    "md /docs/page": { body: html() }, "md /docs/page busted": { type: "text/markdown", body: "<!doctype html>" },
+    "md /docs/page.md": { type: "text/markdown", body: MD },
+  }).f });
+  expect(doors.flatMap((d) => d.attempts).map((a) => `${a.step}:${a.verdict}${a.busted ? ":busted" : ""}`)).toEqual([
+    "in-page:undefined", "link-alternate:http-error", "negotiated:not-markdown", "negotiated:html-body:busted", "md-suffix:markdown",
+  ]);
+});
+
 // ---- checkPage -------------------------------------------------------------
 
 test("a declared, varying, agreeing twin passes with no findings", async () => {

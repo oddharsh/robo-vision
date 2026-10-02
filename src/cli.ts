@@ -49,7 +49,7 @@ function print(r: Report) {
     // a region on the page takes no request, so it leaves no attempt behind
     if (d.copy && !d.attempts.length) console.log(`  HIT  ${d.step.padEnd(14)}   ${d.copy.text.length} chars on the page, shown to visitors`);
     for (const a of d.attempts) {
-      console.log(`  ${a.hit ? "HIT " : "miss"} ${a.step.padEnd(14)} ${a.url ?? ""}  ${a.reason}${a.note ? " (cache-busted)" : ""}`);
+      console.log(`  ${a.hit ? "HIT " : "miss"} ${a.step.padEnd(14)} ${a.url ?? ""}  ${a.reason}${a.busted ? " (cache-busted)" : ""}`);
     }
   }
   const flaky = r.findings.some((f) => f.rule === "cache-ignores-accept");

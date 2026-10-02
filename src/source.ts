@@ -23,6 +23,10 @@ import { BUST_PARAM } from "./params.ts";
 
 export type Step = "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated" | "md-link";
 
+/** what a fetched response turned out to be. A code, because check.ts decides
+ *  on it; `reason` beside it is a sentence for people and free to be reworded */
+export type Verdict = "markdown" | "http-error" | "not-markdown" | "html-body" | "empty-body" | "fetch-failed";
+
 export interface Attempt {
   step: Step;
   url: string | null;
@@ -32,6 +36,10 @@ export interface Attempt {
   ms?: number;
   /** how the request was sent, when that differs from plain (cache-busted, retried) */
   note?: string;
+  /** the judgement on a fetched response; absent where nothing was fetched */
+  verdict?: Verdict;
+  /** sent with the throwaway param, past a cache that ignores Accept */
+  busted?: boolean;
   /** what the response said, for a caller that audits rather than displays */
   status?: number;
   contentType?: string | null;
@@ -79,19 +87,15 @@ export { BUST_PARAM };
 
 const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown"]);
 
-/**
- * Judge a response as a Markdown twin. Returns null on a hit, or the reason
- * it is not one. Exported because this judgement IS the library: the steps
- * are just places to point it.
- */
-export function rejectReason(res: Response, body: string, url: string): string | null {
-  if (!res.ok) return `HTTP ${res.status}`;
+/** Judge a response as a Markdown twin: null on a hit, or what it is instead. */
+export function judge(res: Response, body: string, url: string): { verdict: Exclude<Verdict, "markdown" | "fetch-failed">; reason: string } | null {
+  if (!res.ok) return { verdict: "http-error", reason: `HTTP ${res.status}` };
   const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
   const isMdPath = /\.md(?:$|[?#])/.test(new URL(url).pathname + new URL(url).search);
   // text/plain is how a plain static host serves a .md file it has no type for,
   // so it counts only where the URL itself says Markdown
   if (!MARKDOWN_TYPES.has(type) && !(type === "text/plain" && isMdPath)) {
-    return type ? `answered ${type}` : "no content-type";
+    return { verdict: "not-markdown", reason: type ? `answered ${type}` : "no content-type" };
   }
   // a typed-right response can still be a document: sniff before believing it.
   // Skip a BOM and any leading comments first: Shopify storefronts answer
@@ -99,9 +103,18 @@ export function rejectReason(res: Response, body: string, url: string): string |
   // theme that opens with <!-- BRAND --> put 664 KB of markup past a sniff
   // that only looked at the first tag (allbirds.com, 2026-09-23)
   const lead = body.slice(0, 4096).replace(/^\uFEFF/, "").replace(/^(?:\s*<!--[\s\S]*?-->)*\s*/, "");
-  if (/^<(?:!doctype|html|head|body)\b/i.test(lead)) return "labelled Markdown, body is HTML";
-  if (!body.trim()) return "empty body";
+  if (/^<(?:!doctype|html|head|body)\b/i.test(lead)) return { verdict: "html-body", reason: "labelled Markdown, body is HTML" };
+  if (!body.trim()) return { verdict: "empty-body", reason: "empty body" };
   return null;
+}
+
+/**
+ * judge(), as the sentence alone: null on a hit, or the reason it is not one.
+ * Exported because this judgement IS the library: the steps are just places
+ * to point it.
+ */
+export function rejectReason(res: Response, body: string, url: string): string | null {
+  return judge(res, body, url)?.reason ?? null;
 }
 
 /** the llms.txt-proposal spellings, at most two, cheapest first */
@@ -154,13 +167,13 @@ async function* walk(pageUrl: string, opts: ResolveOptions): AsyncGenerator<Door
       res = await f(url, init);
       body = await res.text();
     } catch (e) {
-      attempts.push({ step, url: shown, hit: false, reason: `fetch failed: ${(e as Error).message}`, ms: Math.round(now() - t0), ...(note && { note }) });
+      attempts.push({ step, url: shown, hit: false, verdict: "fetch-failed", reason: `fetch failed: ${(e as Error).message}`, ms: Math.round(now() - t0), ...(note && { note, busted: true }) });
       return { copy: null, status: null, varies: false };
     }
-    const reject = rejectReason(res, body, res.url || url);
+    const reject = judge(res, body, res.url || url);
     const contentType = res.headers.get("content-type");
     const varies = /(?:^|,)\s*(?:accept|\*)\s*(?:,|$)/i.test(res.headers.get("vary") ?? "");
-    attempts.push({ step, url: shown, hit: !reject, reason: reject ?? `${contentType}, ${body.length} chars`, ms: Math.round(now() - t0), ...(note && { note }), status: res.status, contentType, varies });
+    attempts.push({ step, url: shown, hit: !reject, verdict: reject?.verdict ?? "markdown", reason: reject?.reason ?? `${contentType}, ${body.length} chars`, ms: Math.round(now() - t0), ...(note && { note, busted: true }), status: res.status, contentType, varies });
     return { copy: reject ? null : { step, served: true, url: shown, contentType, text: body, attempts }, status: res.status, varies };
   };
 
