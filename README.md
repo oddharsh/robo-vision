@@ -13,7 +13,12 @@ src/base.css        the only CSS robo-vision ships: integrity rules, plus a
 src/copies.ts       the data layer: a copy for any same-origin URL, no rendering
 src/view.ts         the lazy half: renderPane(), plus copies.ts re-exported
 src/drop-in.ts      zero-markup mode: a docked toggle and a top-layer overlay
-scripts/build.ts    dist/robo-vision.js (+ chunks/) lazy, dist/robo-vision.eager.js single file
+src/facts-html.ts   the page's declarations read from HTML text, where there is no DOM
+src/check.ts        the audit: every door opened, the answers compared, faults named
+src/resolve.ts      the package's DOM-free entry, plus fetchMachineCopy() for agents
+src/cli.ts          robo-vision check <url>
+scripts/build.ts    dist/robo-vision.js (+ chunks/) lazy, dist/robo-vision.eager.js single file,
+                    dist/resolve.js and dist/cli.js for Node
 demo/serve.ts       six server behaviours, one page       bun demo/serve.ts 8841
 probe.ts            the resolver against live sites      bun probe.ts <url>...
 dryrun/             drop robo-vision into 34 live sites in real Chrome
@@ -27,7 +32,8 @@ test/               bun test (the generator tests drive real Chrome)
         data-machine-label="Agent" data-corner="bottom-left"></script>
 ```
 
-Host `dist/` at that path. No markup, no inline script or style for a CSP to
+Host `dist/` at that path, or load it from a CDN that mirrors npm
+(`https://cdn.jsdelivr.net/npm/robo-vision@0.1/dist/robo-vision.js`). No markup, no inline script or style for a CSP to
 allow (styles are adopted as constructed sheets), no server changes.
 
 It brings no look of its own. The base follows the site's font and color
@@ -52,6 +58,51 @@ box, the box model) are plain class selectors, so a global reset cannot break
 it. A site's look for robo-vision lives in that site's stylesheet; this
 repository ships no skins. `demo/demo.css` shows the pattern in a few lines.
 
+## Check what a site serves agents
+
+```
+npx robo-vision check https://docs.stripe.com/checkout/quickstart https://webflow.com/
+```
+
+The toggle stops at the first door with a copy, because each further door
+costs the site a request. `check` opens all of them and compares the answers.
+It exits 1 when a page has an error, so it can gate a deploy; `--strict` fails
+on warnings too, `--json` prints the reports, and `--ua` sets the User-Agent.
+
+| rule | severity | what it caught |
+|---|---|---|
+| `nothing-served` | error | no door serves Markdown, so an agent gets the HTML (konghq.com) |
+| `cache-ignores-accept` | error | Markdown only past the cache: the origin negotiates and the edge answers HTML (webflow.com) |
+| `mislabelled-html` | error | `text/markdown` over an HTML body (Shopify storefronts) |
+| `dead-alternate` | error | a declared twin that is not there |
+| `empty-copy` | error | a Markdown type with nothing in it |
+| `page-unreachable` | error | the page refused this fetcher (a bot wall), so nothing else was asked |
+| `no-vary-accept` | warn | negotiated Markdown with no `Vary: Accept` |
+| `undeclared` | warn | Markdown is served and no `rel=alternate` says so (docs.stripe.com) |
+| `doors-disagree` | warn | two doors serve different words |
+| `in-page-only`, `in-page-drift` | warn | a machine region shown to visitors that agents are not served (cloudflare.com/connect) |
+| `md-suffix-answers-html` | info | a catch-all route answering `/x.md` with the app shell and a 200 |
+
+It fetches from wherever it runs and says who it is, so a site that treats
+fetchers differently by address or User-Agent can answer it differently than
+it answers a browser.
+
+## Use the resolver from an agent
+
+```ts
+import { fetchMachineCopy } from "robo-vision/resolve";
+
+const { copy, html } = await fetchMachineCopy(url);
+const text = copy ? copy.text : myOwnHtmlToText(html);
+```
+
+One request for the page, then one to three for its copy. `copy` is the site's
+own Markdown and has passed `rejectReason()`, so an app shell answering 200 at
+`/x.md` and HTML under a Markdown label both come back as `null`. `html` is the
+page it had to fetch anyway. The same entry exports `resolveMachineCopy`,
+`surveyMachineCopies`, `checkPage` and `factsFromHtml`; none of them touch a
+DOM, and they run in Node 18+, Bun and Workers.
+
 ## Overhead
 
 Measured by A/B on six live sites (aadhar.sh, Cloudflare's docs, Wikipedia,
@@ -72,10 +123,12 @@ cutting its CSS from 6.9 KB to 1.9 KB saved bytes and no measurable time.
 
 ## Run it
 
-No dependencies, just bun.
+No runtime dependencies, just bun (TypeScript is there to emit declarations).
 
 ```
 bun test
+bun run build                     # dist/, everything the npm package ships
+bun run check https://parallel.ai/
 bun run demo                      # http://localhost:8841
 bun run probe https://parallel.ai/ https://www.cloudflare.com/connect/ https://konghq.com/
 ```

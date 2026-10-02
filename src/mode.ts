@@ -19,8 +19,8 @@ export const ATTR = "data-robo-vision-mode";
 export const KEY = "robo-vision:mode";
 export const EVENT = "robo-vision:modechange";
 export const PARAM = "robo-vision";
-/** the negotiation cache-buster (source.ts); stripped wherever a URL is a key */
-export const BUST_PARAM = "_rv";
+import { BUST_PARAM } from "./params.ts";
+export { BUST_PARAM };
 
 /** one page, one key: no fragment, and none of robo-vision's own params */
 export function pageKey(url: string): string {
