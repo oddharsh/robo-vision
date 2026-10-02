@@ -9,6 +9,9 @@
 //   dist/chunks/*.js             those, resolved relative to the entry's URL
 //   dist/robo-vision.eager.js    one classic script with everything inlined,
 //                                for a host that cannot serve module chunks
+//   dist/resolve.js (+ types/)   the resolver and the audit, no DOM: the
+//                                package's `robo-vision/resolve` entry
+//   dist/cli.js                  `robo-vision check <url>`
 //
 // The only CSS is base.css (and base-pane.css with the view): neutral, and
 // restyled by whatever site it lands on with ordinary CSS. A site's own look
@@ -65,8 +68,26 @@ const eager = await Bun.build({
 if (!eager.success) throw new AggregateError(eager.logs, "eager build failed");
 await Bun.write(dist + "robo-vision.eager.js", await eager.outputs[0].text());
 
+// the half that needs no browser: a library entry and the CLI, for Node 18+
+const { version } = await Bun.file(root + "package.json").json();
+const lib = await Bun.build({ entrypoints: [root + "src/resolve.ts"], outdir: dist, format: "esm", target: "node" });
+if (!lib.success) throw new AggregateError(lib.logs, "resolve build failed");
+const cli = await Bun.build({
+  entrypoints: [root + "src/cli.ts"],
+  outdir: dist,
+  format: "esm",
+  target: "node",
+  banner: "#!/usr/bin/env node",
+  define: { __ROBO_VISION_VERSION__: JSON.stringify(version) },
+});
+if (!cli.success) throw new AggregateError(cli.logs, "cli build failed");
+// declarations for robo-vision/resolve only; the drop-in is a script, not an import
+const tsc = Bun.spawnSync(["bun", "x", "tsc", "-p", root + "tsconfig.json"], { stdout: "inherit", stderr: "inherit" });
+if (tsc.exitCode !== 0) throw new Error("declarations failed");
+
 const gz = async (p: string) => Bun.gzipSync(new Uint8Array(await Bun.file(p).arrayBuffer()), { level: 9 }).length;
 const row = async (p: string) => `${p.replace(dist, "dist/").padEnd(42)} ${String(Bun.file(p).size).padStart(6)} B  ${String(await gz(p)).padStart(6)} B gz`;
 console.log(`css: ${css.length} B up front (base), ${paneCss.length} B with the view`);
 for (const o of lazy.outputs) console.log(await row(o.path));
 console.log(await row(dist + "robo-vision.eager.js"));
+for (const o of [...lib.outputs, ...cli.outputs]) console.log(await row(o.path));

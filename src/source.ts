@@ -19,7 +19,7 @@
 // answering /anything.md with the app shell. Neither is a twin, and treating
 // either as one would show a human "what the machine sees" as a page of markup.
 
-import { BUST_PARAM } from "./mode.ts";
+import { BUST_PARAM } from "./params.ts";
 
 export type Step = "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated" | "md-link";
 
@@ -32,6 +32,11 @@ export interface Attempt {
   ms?: number;
   /** how the request was sent, when that differs from plain (cache-busted, retried) */
   note?: string;
+  /** what the response said, for a caller that audits rather than displays */
+  status?: number;
+  contentType?: string | null;
+  /** the response carried Vary: Accept (or *) */
+  varies?: boolean;
 }
 
 export interface MachineCopy {
@@ -57,8 +62,11 @@ export interface ResolveOptions {
   facts?: PageFacts;
   /** called only when nothing else hit */
   generate?: () => string | Promise<string>;
-  /** skip steps, e.g. a CLI that has no DOM to generate from */
-  skip?: Step[];
+  /** skip steps, e.g. a CLI that has no DOM to generate from. A step skipped
+   *  with a reason is recorded as an attempt, in its place in the order */
+  skip?: (Step | { step: Step; reason: string })[];
+  /** which doors to walk, in which order; defaults to ORDER */
+  order?: Step[];
   /** extra request headers (a CLI identifies itself; a browser cannot) */
   headers?: Record<string, string>;
   /** retry negotiation with a throwaway query param when the plain answer
@@ -111,19 +119,34 @@ export function suffixCandidates(pageUrl: string): string[] {
   return [new URL(`${p.replace(/\.html?$/, "")}.md`, u).href];
 }
 
-export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions = {}): Promise<MachineCopy> {
+/** every door, cheapest and most explicit first */
+export const ORDER: Step[] = ["in-page", "link-alternate", "negotiated", "md-suffix", "generated"];
+
+/** what one door answered: its copy, if it had one, and the requests it took */
+export interface Door {
+  step: Step;
+  copy: MachineCopy | null;
+  attempts: Attempt[];
+}
+
+// One walk, two readers. resolveMachineCopy() stops at the first door with a
+// copy, because in a browser every further door costs the site a request.
+// surveyMachineCopies() opens them all, because an audit wants to know whether
+// the doors agree. The judgement and the order are the same code either way.
+async function* walk(pageUrl: string, opts: ResolveOptions): AsyncGenerator<Door> {
   const f = opts.fetch ?? globalThis.fetch.bind(globalThis);
-  const skip = new Set(opts.skip ?? []);
+  const why = new Map<Step, string | null>();
+  for (const s of opts.skip ?? []) typeof s === "string" ? why.set(s, null) : why.set(s.step, s.reason);
   // nothing on a non-http page can be fetched; go straight to what the page has
-  if (!/^https?:$/.test(new URL(pageUrl).protocol)) for (const s of ["link-alternate", "negotiated", "md-suffix"] as Step[]) skip.add(s);
-  const attempts: Attempt[] = [];
-  const done = (step: Step, served: boolean, url: string | null, contentType: string | null, text: string): MachineCopy =>
-    ({ step, served, url, contentType, text, attempts });
+  if (!/^https?:$/.test(new URL(pageUrl).protocol)) for (const s of ["link-alternate", "negotiated", "md-suffix"] as Step[]) why.set(s, null);
+
+  // no generator handed in (a CLI has no DOM): there is no such door to open
+  if (!opts.generate) why.set("generated", null);
 
   const now = () => globalThis.performance?.now() ?? Date.now();
   // `url` is what goes on the wire; `shown` is what the pane and the result
   // report, so a cache-busting param never leaks into a link someone copies
-  const tryFetch = async (step: Step, url: string, init: RequestInit, shown = url, note = ""): Promise<{ copy: MachineCopy | null; status: number | null; varies: boolean }> => {
+  const tryFetch = async (attempts: Attempt[], step: Step, url: string, init: RequestInit, shown = url, note = ""): Promise<{ copy: MachineCopy | null; status: number | null; varies: boolean }> => {
     const t0 = now();
     let res: Response;
     let body: string;
@@ -134,10 +157,11 @@ export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions =
       attempts.push({ step, url: shown, hit: false, reason: `fetch failed: ${(e as Error).message}`, ms: Math.round(now() - t0), ...(note && { note }) });
       return { copy: null, status: null, varies: false };
     }
-    const why = rejectReason(res, body, res.url || url);
-    attempts.push({ step, url: shown, hit: !why, reason: why ?? `${res.headers.get("content-type")}, ${body.length} chars`, ms: Math.round(now() - t0), ...(note && { note }) });
+    const reject = rejectReason(res, body, res.url || url);
+    const contentType = res.headers.get("content-type");
     const varies = /(?:^|,)\s*(?:accept|\*)\s*(?:,|$)/i.test(res.headers.get("vary") ?? "");
-    return { copy: why ? null : done(step, true, shown, res.headers.get("content-type"), body), status: res.status, varies };
+    attempts.push({ step, url: shown, hit: !reject, reason: reject ?? `${contentType}, ${body.length} chars`, ms: Math.round(now() - t0), ...(note && { note }), status: res.status, contentType, varies });
+    return { copy: reject ? null : { step, served: true, url: shown, contentType, text: body, attempts }, status: res.status, varies };
   };
 
   // the browser's HTTP cache keys on URL and honours Vary only when the server
@@ -151,64 +175,103 @@ export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions =
 
   const facts = opts.facts;
 
-  if (!skip.has("in-page")) {
-    if (facts?.inPage?.trim()) return done("in-page", false, null, null, facts.inPage);
-    attempts.push({ step: "in-page", url: null, hit: false, reason: facts ? "no machine region" : "no page facts" });
-  }
+  const open: Record<Exclude<Step, "md-link">, (attempts: Attempt[]) => Promise<MachineCopy | null>> = {
+    "in-page": async (attempts) => {
+      if (facts?.inPage?.trim()) return { step: "in-page", served: false, url: null, contentType: null, text: facts.inPage, attempts };
+      attempts.push({ step: "in-page", url: null, hit: false, reason: facts ? "no machine region" : "no page facts" });
+      return null;
+    },
 
-  if (!skip.has("link-alternate")) {
-    const alts = (facts?.alternates ?? []).map((h) => new URL(h, pageUrl).href);
-    if (!alts.length) attempts.push({ step: "link-alternate", url: null, hit: false, reason: facts ? "none declared" : "no page facts" });
-    for (const href of alts) {
-      const { copy } = await tryFetch("link-alternate", href, md("text/markdown, text/plain;q=0.5"));
-      if (copy) return copy;
+    "link-alternate": async (attempts) => {
+      const alts = (facts?.alternates ?? []).map((h) => new URL(h, pageUrl).href);
+      if (!alts.length) attempts.push({ step: "link-alternate", url: null, hit: false, reason: facts ? "none declared" : "no page facts" });
+      for (const href of alts) {
+        const { copy } = await tryFetch(attempts, "link-alternate", href, md("text/markdown, text/plain;q=0.5"));
+        if (copy) return copy;
+      }
+      return null;
+    },
+
+    "negotiated": async (attempts) => {
+      // markdown alone, no HTML fallback offered: a server that cannot comply
+      // should say so (406) or send HTML, and rejectReason reads either one.
+      //
+      // Ask plainly first, because a plain request is what an agent sends and
+      // its answer is what an agent gets, cached copy and all. Only when that
+      // answer is not Markdown AND the response does not vary on Accept is the
+      // shared cache a suspect: it keys on the URL and hands back whichever
+      // representation it stored last. Then a throwaway param (CData's trick,
+      // `?_mdcb=`) reaches the origin. Measured 2026-09-23: webflow.com answered
+      // Markdown on 1 of 4 plain requests (all cache HITs, no Vary: Accept) and
+      // 4 of 4 busted ones (all MISSes). Busting every time was tried and
+      // rejected: cdata.com varies correctly, and busting it showed the origin's
+      // fresh copy while agents were being served a 21-minute-old cached one
+      // with a JSON-LD block the origin had since dropped.
+      const plain = new URL(pageUrl);
+      plain.hash = "";
+      const first = await tryFetch(attempts, "negotiated", plain.href, md("text/markdown"), pageUrl);
+      if (first.copy) return first.copy;
+      const suspectCache = first.status !== null && first.status < 400 && !first.varies;
+      if (opts.cacheBust !== false && suspectCache) {
+        const wire = new URL(plain);
+        wire.searchParams.set(BUST_PARAM, Math.random().toString(36).slice(2, 10));
+        const busted = await tryFetch(attempts, "negotiated", wire.href, md("text/markdown"), pageUrl,
+          "cache-busted: the plain answer was not Markdown and the response does not vary on Accept");
+        if (busted.copy) return busted.copy;
+      }
+      return null;
+    },
+
+    "md-suffix": async (attempts) => {
+      for (const url of suffixCandidates(pageUrl)) {
+        const { copy } = await tryFetch(attempts, "md-suffix", url, md("text/markdown, text/plain;q=0.5"));
+        if (copy) return copy;
+      }
+      return null;
+    },
+
+    "generated": async (attempts) => {
+      const t0 = now();
+      const text = await opts.generate!();
+      attempts.push({ step: "generated", url: null, hit: true, reason: `${text.length} chars from the live DOM`, ms: Math.round(now() - t0) });
+      return { step: "generated", served: false, url: null, contentType: null, text, attempts };
+    },
+  };
+
+  for (const step of opts.order ?? ORDER) {
+    if (step === "md-link") continue;
+    const attempts: Attempt[] = [];
+    if (why.has(step)) {
+      const reason = why.get(step);
+      if (reason == null) continue;
+      attempts.push({ step, url: null, hit: false, reason });
+      yield { step, copy: null, attempts };
+      continue;
     }
+    yield { step, copy: await open[step](attempts), attempts };
   }
+}
 
-  if (!skip.has("negotiated")) {
-    // markdown alone, no HTML fallback offered: a server that cannot comply
-    // should say so (406) or send HTML, and rejectReason reads either one.
-    //
-    // Ask plainly first, because a plain request is what an agent sends and
-    // its answer is what an agent gets, cached copy and all. Only when that
-    // answer is not Markdown AND the response does not vary on Accept is the
-    // shared cache a suspect: it keys on the URL and hands back whichever
-    // representation it stored last. Then a throwaway param (CData's trick,
-    // `?_mdcb=`) reaches the origin. Measured 2026-09-23: webflow.com answered
-    // Markdown on 1 of 4 plain requests (all cache HITs, no Vary: Accept) and
-    // 4 of 4 busted ones (all MISSes). Busting every time was tried and
-    // rejected: cdata.com varies correctly, and busting it showed the origin's
-    // fresh copy while agents were being served a 21-minute-old cached one
-    // with a JSON-LD block the origin had since dropped.
-    const plain = new URL(pageUrl);
-    plain.hash = "";
-    const first = await tryFetch("negotiated", plain.href, md("text/markdown"), pageUrl);
-    if (first.copy) return first.copy;
-    const suspectCache = first.status !== null && first.status < 400 && !first.varies;
-    if (opts.cacheBust !== false && suspectCache) {
-      const wire = new URL(plain);
-      wire.searchParams.set(BUST_PARAM, Math.random().toString(36).slice(2, 10));
-      const busted = await tryFetch("negotiated", wire.href, md("text/markdown"), pageUrl,
-        "cache-busted: the plain answer was not Markdown and the response does not vary on Accept");
-      if (busted.copy) return busted.copy;
-    }
+/** the first door with a copy; its attempts are the whole trail that led there */
+export async function resolveMachineCopy(pageUrl: string, opts: ResolveOptions = {}): Promise<MachineCopy> {
+  const attempts: Attempt[] = [];
+  for await (const door of walk(pageUrl, opts)) {
+    attempts.push(...door.attempts);
+    if (door.copy) return { ...door.copy, attempts };
   }
-
-  if (!skip.has("md-suffix")) {
-    for (const url of suffixCandidates(pageUrl)) {
-      const { copy } = await tryFetch("md-suffix", url, md("text/markdown, text/plain;q=0.5"));
-      if (copy) return copy;
-    }
-  }
-
-  if (!skip.has("generated") && opts.generate) {
-    const t0 = now();
-    const text = await opts.generate();
-    attempts.push({ step: "generated", url: null, hit: true, reason: `${text.length} chars from the live DOM`, ms: Math.round(now() - t0) });
-    return done("generated", false, null, null, text);
-  }
-
   throw Object.assign(new Error("no machine copy found and generation not available"), { attempts });
+}
+
+/**
+ * Every door's answer, hit or miss, with no early exit. For an audit: whether
+ * the declared twin, the negotiated answer and the .md file exist and agree.
+ * It never throws for want of a copy, and it costs every request there is, so
+ * it is not what a toggle on someone's site should call.
+ */
+export async function surveyMachineCopies(pageUrl: string, opts: ResolveOptions = {}): Promise<Door[]> {
+  const doors: Door[] = [];
+  for await (const door of walk(pageUrl, opts)) doors.push(door);
+  return doors;
 }
 
 /** read PageFacts off a live Document (browser side) */

@@ -7,8 +7,9 @@
 // hidden, re-parented, or restyled, which is what makes it safe to try on a
 // site you did not write.
 //
-//   import { dropIn } from "robo-vision/drop-in";
-//   dropIn({ corner: "bottom-right" });
+//   dropIn({ corner: "bottom-right", css });
+//
+// drop-in-entry.ts is the caller: it reads the options off the script tag.
 
 import type { ModeToggle } from "./mode-toggle.ts";
 import "./mode-toggle.ts";

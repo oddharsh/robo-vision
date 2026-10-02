@@ -1,16 +1,42 @@
 {
   "name": "robo-vision",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "description": "A Human/Machine toggle that shows the copy an agent is actually served, and generates one only when a site publishes nothing.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oddharsh/robo-vision.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "robo-vision": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/robo-vision.js",
+    "./eager": "./dist/robo-vision.eager.js",
+    "./resolve": {
+      "types": "./dist/types/resolve.d.ts",
+      "default": "./dist/resolve.js"
+    }
+  },
+  "unpkg": "./dist/robo-vision.js",
+  "jsdelivr": "./dist/robo-vision.js",
   "scripts": {
+    "build": "bun scripts/build.ts",
     "test": "bun test",
     "demo": "bun demo/serve.ts 8841",
-    "probe": "bun probe.ts"
+    "check": "bun src/cli.ts check",
+    "probe": "bun probe.ts",
+    "prepublishOnly": "bun scripts/build.ts"
   },
   "devDependencies": {
-    "playwright-core": "1.63.0"
+    "playwright-core": "1.63.0",
+    "typescript": "^7.0.2"
   }
 }

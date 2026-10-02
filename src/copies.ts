@@ -29,7 +29,7 @@
 // not stop /docs/ from being asked. A declared alternate is always read, since
 // a declaration is evidence and costs no guess.
 
-import { resolveMachineCopy, factsFromDocument, suffixCandidates, type Attempt, type MachineCopy, type Step } from "./source.ts";
+import { resolveMachineCopy, factsFromDocument, suffixCandidates, type MachineCopy } from "./source.ts";
 import { generateMarkdown } from "./generate.ts";
 import { pageKey } from "./mode.ts";
 
@@ -38,7 +38,6 @@ export type { MachineCopy };
 const MEMO = "robo-vision:served-by";
 type Fetched = "negotiated" | "md-suffix";
 const FETCHED: Fetched[] = ["negotiated", "md-suffix"];
-const ALL: Step[] = ["in-page", "link-alternate", "negotiated", "md-suffix", "generated"];
 
 const cache = new Map<string, Promise<MachineCopy | null>>();
 
@@ -52,10 +51,7 @@ function noteNothing(url: string, nothing: boolean): void {
     else sessionStorage.removeItem(section(url));
   } catch { /* fine without it */ }
 }
-const skipped = (url: string): Attempt => ({
-  step: "negotiated", url: null, hit: false,
-  reason: `not asked: /${new URL(url).pathname.split("/")[1] ?? ""} served no Markdown earlier this session`,
-});
+const notAsked = (url: string) => `not asked: /${new URL(url).pathname.split("/")[1] ?? ""} served no Markdown earlier this session`;
 
 function preferred(): Fetched[] {
   let memo: string | null = null;
@@ -82,12 +78,11 @@ export function copyForThisPage(page: string, opts: { exclude?: string[] } = {})
   const p = resolveMachineCopy(key, {
     facts: factsFromDocument(document),
     generate: () => generateMarkdown(document, { exclude: opts.exclude }),
-    skip: guessless ? ["negotiated", "md-suffix"] : [],
+    skip: guessless ? [{ step: "negotiated", reason: notAsked(key) }, "md-suffix"] : [],
   }).then((c) => {
     remember(c, key);
-    if (guessless) c.attempts.splice(2, 0, skipped(key));
     // only a page that was actually asked can prove the section serves nothing
-    else noteNothing(key, c.step === "generated");
+    if (!guessless) noteNothing(key, c.step === "generated");
     if (c.served) noteNothing(key, false);
     return c;
   });
@@ -107,7 +102,7 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
     // pages this way): read it as the Markdown it says it is, outside the
     // per-origin strategy memory, since it says nothing about how the site
     // serves copies for its ordinary page URLs
-    const p = resolveMachineCopy(key, { facts: { alternates: [key], inPage: null }, skip: ["in-page", "negotiated", "md-suffix", "generated"] })
+    const p = resolveMachineCopy(key, { facts: { alternates: [key], inPage: null }, order: ["link-alternate"] })
       .then((c): MachineCopy => ({ ...c, step: "md-link", attempts: c.attempts.filter((a) => a.url).map((a) => ({ ...a, step: "md-link" })) }))
       .catch(() => null);
     cache.set(key, p);
@@ -118,17 +113,11 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
     // known empty: skip the requests; the caller loads the page for real and
     // that page generates without asking either
     if (servesNothing(key)) return null;
-    const tried: Attempt[] = [];
-    for (const step of preferred()) {
-      try {
-        const c = await resolveMachineCopy(key, { facts: { alternates: [], inPage: null }, skip: ALL.filter((s) => s !== step) });
-        c.attempts.unshift(...tried);
-        remember(c, key);
-        return c;
-      } catch (e) {
-        tried.push(...((e as { attempts?: Attempt[] }).attempts ?? []));
-      }
-    }
+    try {
+      const c = await resolveMachineCopy(key, { order: preferred() });
+      remember(c, key);
+      return c;
+    } catch { /* neither door had one */ }
     noteNothing(key, true);
     return null;
   })();
