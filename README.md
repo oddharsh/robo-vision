@@ -15,6 +15,8 @@ src/view.ts         the lazy half: renderPane(), plus copies.ts re-exported
 src/drop-in.ts      zero-markup mode: a docked toggle and a top-layer overlay
 src/facts-html.ts   the page's declarations read from HTML text, where there is no DOM
 src/check.ts        the audit: every door opened, the answers compared, faults named
+src/memory.ts       what an origin has shown: the door that worked, sections that serve nothing
+src/reroute.ts      a 404, and which of the origin's real pages it meant
 src/resolve.ts      the package's DOM-free entry, plus fetchMachineCopy() for agents
 src/cli.ts          robo-vision check <url>
 scripts/build.ts    dist/robo-vision.js (+ chunks/) lazy, dist/robo-vision.eager.js single file,
@@ -92,16 +94,74 @@ it answers a browser.
 ```ts
 import { fetchMachineCopy } from "robo-vision/resolve";
 
-const { copy, html } = await fetchMachineCopy(url);
-const text = copy ? copy.text : myOwnHtmlToText(html);
+const r = await fetchMachineCopy(url);
+if (r.copy) use(r.copy.text);                 // the site's own Markdown
+else if (r.suggestions?.length) pick(r.suggestions); // a 404, and the real pages it may have meant
+else use(myOwnHtmlToText(r.html));
 ```
 
 One request for the page, then one to three for its copy. `copy` is the site's
-own Markdown and has passed `rejectReason()`, so an app shell answering 200 at
-`/x.md` and HTML under a Markdown label both come back as `null`. `html` is the
-page it had to fetch anyway. The same entry exports `resolveMachineCopy`,
-`surveyMachineCopies`, `checkPage` and `factsFromHtml`; none of them touch a
-DOM, and they run in Node 18+, Bun and Workers.
+own Markdown and has passed `judge()`, so an app shell answering 200 at `/x.md`
+and HTML under a Markdown label both come back as `null`. `html` is the page it
+had to fetch anyway. Nothing here touches a DOM: it runs in Node 18+, Bun and
+Workers.
+
+**It remembers each origin** for an hour, in a Map: the door that served last
+is asked first, and a section that served nothing is not asked again. A site
+that serves `.md` twins costs 2 requests a page after the first. Pass
+`memory: originMemory(store)` to keep it elsewhere (any `get`/`set` of strings),
+or `memory: null`.
+
+**On a 404 it reads the site's page list** and does one of two things:
+
+| the URL | result |
+|---|---|
+| differs from exactly one real page by case, a trailing slash, `.html` or `/index` | that page is read, and `rerouted` says what was fixed |
+| anything fuzzier: a typo, a renamed page | nothing is followed; `suggestions` ranks real pages with a score |
+
+The list is `llms.txt` by default (one request, with titles) plus the links in
+copies already read on that origin. `reroute: { pages: ["llms", "sitemap"] }`
+adds the sitemap, found through `robots.txt`, then `/sitemap.xml`, then
+`/sitemap-index.xml`, with indexes walked and reads capped at 5 MB.
+`reroute: false` returns the bare 404.
+
+The candidates are a closed set: a chooser ranks the origin's own pages and
+anything else it returns is dropped. The built-in chooser scores spelling,
+which catches typos and misses synonyms (`/jobs` for `/careers`). For those,
+plug in a decision model, the way [ry](https://github.com/ygwyg/ry) uses
+Cloudflare's Clef for visitors:
+
+```ts
+import { fetchMachineCopy, type Chooser } from "robo-vision/resolve";
+
+const clef: Chooser = async (missing, options) => {
+  const out = await env.AI.run("@cf/cloudflare/clef-flash", {
+    question: `Which page did a request for ${new URL(missing).pathname} mean?`,
+    options: options.map((o) => ({ id: o.url, label: o.title ?? new URL(o.url).pathname })),
+  });
+  return options.map((o) => ({ ...o, score: out.probabilities[o.url] ?? 0 }));
+};
+await fetchMachineCopy(url, { reroute: { chooser: clef } });
+```
+
+(The request shape above is illustrative; check Clef's docs for the current
+one.) Any classifier fits: the seam is options in, a score per option out.
+
+Nothing in this depends on the site's host. It reads a status code, `llms.txt`
+and sitemaps, which every host serves the same way. Measured 2026-10-02 on 20
+docs sites (9 Vercel, 4 Netlify, 5 Cloudflare, 2 other): all 20 answered a
+missing page with a real 404, so none hid a miss behind a 200.
+`bun test/hosts.live.ts` reruns a sample from each:
+
+| host | site | asked for | result |
+|---|---|---|---|
+| Vercel | nextjs.org | `.../instalation` | suggested `.../installation`, 0.984 |
+| Vercel | react.dev | `/learn/thinking-in-reakt` | suggested `/learn/thinking-in-react`, 0.968 |
+| Netlify | docs.netlify.com | `.../environment-variabls` | suggested `.../environment-variables`, 0.988 |
+| Netlify | vuejs.org | `/guide/Introduction` | the host answers it (200) |
+| Cloudflare | hono.dev | `.../cloudflare-worker` | suggested `.../cloudflare-workers`, 0.985 |
+| Cloudflare | developers.cloudflare.com | `.../fetch-handler` | suggested `/workers/runtime-apis/handlers/`, 0.81 |
+| Cloudflare | docs.astro.build | `.../instalation/` | weak: the page is `/en/install-and-setup/`, a rename a model catches and spelling does not |
 
 ## Overhead
 

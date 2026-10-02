@@ -132,6 +132,17 @@ export function suffixCandidates(pageUrl: string): string[] {
   return [new URL(`${p.replace(/\.html?$/, "")}.md`, u).href];
 }
 
+/** "/x.md" -> "/x", by the llms.txt spellings; null if it is not a .md URL */
+export function strippedPage(mdUrl: string): string | null {
+  const u = new URL(mdUrl);
+  const p = u.pathname;
+  if (!p.endsWith(".md")) return null;
+  if (p.endsWith("/index.md")) u.pathname = p.slice(0, -"index.md".length);
+  else if (p === "/.md") u.pathname = "/"; // parallel.ai's root twin
+  else u.pathname = p.slice(0, -".md".length); // also .html.md -> .html
+  return u.href;
+}
+
 /** every door, cheapest and most explicit first */
 export const ORDER: Step[] = ["in-page", "link-alternate", "negotiated", "md-suffix", "generated"];
 
