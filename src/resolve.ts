@@ -67,9 +67,33 @@ export async function fetchMachineCopy(url: string, opts: FetchOptions = {}): Pr
     const r = await findPage(page, { ...opts.reroute, fetch: f, memory: memory ?? undefined });
     if (r.rerouted) {
       const next = await fetchMachineCopy(r.rerouted.to, { ...opts, reroute: false });
-      return { ...next, rerouted: { ...r.rerouted, from: url } };
+      if (next.status < 400) return { ...next, rerouted: { ...r.rerouted, from: url } };
+      // the list named a page that is gone too (a stale llms.txt): nothing was
+      // followed, so rank the rest rather than call it a reroute
+      const rest = await findPage(page, { ...opts.reroute, fetch: f, memory: memory ?? undefined, dead: [r.rerouted.to] });
+      return { ...base, copy: null, attempts: [], suggestions: rest.suggestions };
     }
     return { ...base, copy: null, attempts: [], suggestions: r.suggestions };
+  };
+
+  // a page's HTML in hand: its doors, then its links remembered for a later 404
+  const read = async (base: Omit<Fetched, "copy" | "attempts">): Promise<Fetched> => {
+    // an in-page region is shown to visitors, never served; an agent skips it.
+    // A declared alternate is always read, since a declaration costs no guess
+    try {
+      const copy = await resolveRemembered(base.url, memory, { ...opts, fetch: f, facts: factsFromHtml(base.html), order: ["link-alternate", "negotiated", "md-suffix"] });
+      // the links in a copy are pages this origin has, for a later 404
+      if (memory) {
+        const origin = new URL(base.url).origin;
+        const known = memory.pages(origin, "seen") ?? [];
+        const have = new Set(known.map((p) => p.url));
+        const fresh = linksIn(copy.text, base.url).filter((p) => !have.has(p.url));
+        if (fresh.length) memory.setPages(origin, "seen", [...known, ...fresh].slice(-2000));
+      }
+      return { ...base, copy, attempts: copy.attempts };
+    } catch (e) {
+      return { ...base, copy: null, attempts: (e as { attempts?: Attempt[] }).attempts ?? [] };
+    }
   };
 
   if (isMarkdownUrl(url)) {
@@ -77,9 +101,11 @@ export async function fetchMachineCopy(url: string, opts: FetchOptions = {}): Pr
     // keeps that response, so its status drives the 404 handling and its body
     // is the fallback when it turns out not to be Markdown
     let seen: Response | null = null;
+    let landed = "";
     const tap = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const r = await f(input, init);
       seen = r.clone();
+      landed = r.url; // where a redirect ended; read off the original, which a clone need not keep
       return r;
     }) as typeof fetch;
     let copy: MachineCopy | null = null;
@@ -91,33 +117,21 @@ export async function fetchMachineCopy(url: string, opts: FetchOptions = {}): Pr
       attempts = (e as { attempts?: Attempt[] }).attempts ?? [];
     }
     const res = seen as Response | null;
-    const base = { html: copy || !res ? "" : await res.text(), url: res?.url || url, status: res?.status ?? 0 };
+    const base = { html: copy || !res ? "" : await res.text(), url: landed || res?.url || url, status: res?.status ?? 0 };
     if (base.status === 404 && opts.reroute !== false) return notFound(base.url, base);
+    // the .md redirected to a page (/x.md -> /x): its HTML is already here,
+    // and the page's own doors may still serve its copy
+    if (!copy && res?.ok && !isMarkdownUrl(base.url)) {
+      const paged = await read(base);
+      return { ...paged, attempts: [...attempts, ...paged.attempts] };
+    }
     return { ...base, copy, attempts };
   }
 
   const res = await f(url, { headers: { ...opts.headers, accept: "text/html" }, redirect: "follow" });
-  const html = await res.text();
-  const page = res.url || url;
-  const base = { html, url: page, status: res.status };
+  const base = { html: await res.text(), url: res.url || url, status: res.status };
 
-  if (res.status === 404 && opts.reroute !== false) return notFound(page, base);
+  if (res.status === 404 && opts.reroute !== false) return notFound(base.url, base);
   if (!res.ok) return { ...base, copy: null, attempts: [] };
-
-  // an in-page region is shown to visitors, never served; an agent skips it.
-  // A declared alternate is always read, since a declaration costs no guess
-  try {
-    const copy = await resolveRemembered(page, memory, { ...opts, fetch: f, facts: factsFromHtml(html), order: ["link-alternate", "negotiated", "md-suffix"] });
-    // the links in a copy are pages this origin has, for a later 404
-    if (memory) {
-      const origin = new URL(page).origin;
-      const known = memory.pages(origin, "seen") ?? [];
-      const have = new Set(known.map((p) => p.url));
-      const fresh = linksIn(copy.text, page).filter((p) => !have.has(p.url));
-      if (fresh.length) memory.setPages(origin, "seen", [...known, ...fresh].slice(-2000));
-    }
-    return { ...base, copy, attempts: copy.attempts };
-  } catch (e) {
-    return { ...base, copy: null, attempts: (e as { attempts?: Attempt[] }).attempts ?? [] };
-  }
+  return read(base);
 }
