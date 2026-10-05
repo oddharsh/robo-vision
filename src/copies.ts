@@ -15,82 +15,44 @@
 // link costs one Markdown request, a hover can fetch it before the click, and
 // the same function serves anything else that wants a copy without a view.
 //
-// Each origin tends to serve every page the same way, so the step that worked
-// last is tried first next time: after one .md hit, the next page is asked for
-// its .md before anything is negotiated.
-//
-// The negative is remembered too. A site that serves no Markdown cost 3 failed
-// requests per page (a negotiation and up to two .md spellings, each a 404 in
-// the site's logs and the console) before generating: median 494 ms to a pane
-// in the dry run, nearly all of it waiting on those misses. After one miss the
-// rest of the SECTION (first path segment) skips straight to generating.
-// Scoped to a section rather than the origin because a site often serves
-// Markdown under /docs/ and nothing on its marketing pages; a miss on / must
-// not stop /docs/ from being asked. A declared alternate is always read, since
-// a declaration is evidence and costs no guess.
+// What the origin has shown about how it serves copies (the door that worked
+// last, the sections that serve nothing) is memory.ts, kept here in
+// sessionStorage so it lasts the tab's session and no longer. A declared
+// alternate is always read, since a declaration is evidence and costs no guess.
 
-import { resolveMachineCopy, factsFromDocument, suffixCandidates, type MachineCopy } from "./source.ts";
+import { resolveMachineCopy, strippedPage, mediaType, type MachineCopy } from "./source.ts";
+import { factsFromDocument } from "./facts-dom.ts";
+import { originMemory, resolveRemembered } from "./memory.ts";
 import { generateMarkdown } from "./generate.ts";
-import { pageKey } from "./mode.ts";
+import { keyOf as pageKey, isMarkdownUrl } from "./params.ts";
 
 export type { MachineCopy };
 
-const MEMO = "robo-vision:served-by";
-type Fetched = "negotiated" | "md-suffix";
-const FETCHED: Fetched[] = ["negotiated", "md-suffix"];
-
 const cache = new Map<string, Promise<MachineCopy | null>>();
 
-const section = (url: string) => `robo-vision:none:${new URL(url).pathname.split("/")[1] ?? ""}`;
-function servesNothing(url: string): boolean {
-  try { return sessionStorage.getItem(section(url)) === "1"; } catch { return false; }
-}
-function noteNothing(url: string, nothing: boolean): void {
-  try {
-    if (nothing) sessionStorage.setItem(section(url), "1");
-    else sessionStorage.removeItem(section(url));
-  } catch { /* fine without it */ }
-}
-const notAsked = (url: string) => `not asked: /${new URL(url).pathname.split("/")[1] ?? ""} served no Markdown earlier this session`;
-
-function preferred(): Fetched[] {
-  let memo: string | null = null;
-  try { memo = sessionStorage.getItem(MEMO); } catch { /* storage refused: default order */ }
-  return memo === "md-suffix" ? ["md-suffix", "negotiated"] : FETCHED;
-}
-
-// a declared alternate that happens to sit at the .md spelling tells us the
-// suffix works on this origin, which the next page can use without its HTML
-function remember(copy: MachineCopy, page: string): void {
-  let step: Fetched | null = null;
-  if (copy.step === "negotiated" || copy.step === "md-suffix") step = copy.step;
-  else if (copy.step === "link-alternate" && copy.url && suffixCandidates(page).includes(pageKey(copy.url))) step = "md-suffix";
-  if (!step) return;
-  try { sessionStorage.setItem(MEMO, step); } catch { /* fine without it */ }
-}
+// sessionStorage throws in a private window or when blocked; memory.ts reads
+// a throw as "nothing known"
+const memory = originMemory(
+  { get: (k) => sessionStorage.getItem(k), set: (k, v) => (v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v)) },
+  { ttl: Infinity },
+);
 
 /** the document the browser loaded; cached for the life of the page */
 export function copyForThisPage(page: string, opts: { exclude?: string[] } = {}): Promise<MachineCopy> {
   const key = pageKey(page);
   const hit = cache.get(key);
   if (hit) return hit as Promise<MachineCopy>;
-  const guessless = servesNothing(key);
-  const p = resolveMachineCopy(key, {
+  const p = resolveRemembered(key, memory, {
     facts: factsFromDocument(document),
     generate: () => generateMarkdown(document, { exclude: opts.exclude }),
-    skip: guessless ? [{ step: "negotiated", reason: notAsked(key) }, "md-suffix"] : [],
-  }).then((c) => {
-    remember(c, key);
-    // only a page that was actually asked can prove the section serves nothing
-    if (!guessless) noteNothing(key, c.step === "generated");
-    if (c.served) noteNothing(key, false);
-    return c;
   });
   cache.set(key, p);
+  // a failure is not kept: the next press of Machine asks again, as copyFor's
+  // misses do. Only this promise is dropped, never a newer one under the key
+  p.catch(() => { if (cache.get(key) === p) cache.delete(key); });
   return p;
 }
 
-const isMarkdownUrl = (url: string) => new URL(url).pathname.endsWith(".md");
 
 /** another same-origin page, fetched and never rendered; null if it serves nothing */
 export function copyFor(url: string): Promise<MachineCopy | null> {
@@ -102,25 +64,15 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
     // pages this way): read it as the Markdown it says it is, outside the
     // per-origin strategy memory, since it says nothing about how the site
     // serves copies for its ordinary page URLs
-    const p = resolveMachineCopy(key, { facts: { alternates: [key], inPage: null }, order: ["link-alternate"] })
-      .then((c): MachineCopy => ({ ...c, step: "md-link", attempts: c.attempts.filter((a) => a.url).map((a) => ({ ...a, step: "md-link" })) }))
-      .catch(() => null);
+    const p = resolveMachineCopy(key).catch(() => null);
     cache.set(key, p);
     p.then((c) => { if (!c) cache.delete(key); });
     return p;
   }
-  const p = (async () => {
-    // known empty: skip the requests; the caller loads the page for real and
-    // that page generates without asking either
-    if (servesNothing(key)) return null;
-    try {
-      const c = await resolveMachineCopy(key, { order: preferred() });
-      remember(c, key);
-      return c;
-    } catch { /* neither door had one */ }
-    noteNothing(key, true);
-    return null;
-  })();
+  // only the doors a request can answer; in a quiet section neither is
+  // asked, and null sends the caller to load the page for real, where it
+  // generates without asking either
+  const p = resolveRemembered(key, memory, { order: ["negotiated", "md-suffix"] }).catch(() => null);
   cache.set(key, p);
   // a miss is not remembered past this page: the next load may serve it
   p.then((c) => { if (!c) cache.delete(key); });
@@ -137,16 +89,7 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
 // /sitemap.md and /design.md: both stripped URLs are 404s). So the stripped
 // URL is asked about first, and only a 200 that is HTML earns the address bar.
 
-/** "/x.md" -> "/x", by the llms.txt spellings; null if it is not a .md URL */
-export function strippedPage(mdUrl: string): string | null {
-  const u = new URL(mdUrl);
-  const p = u.pathname;
-  if (!p.endsWith(".md")) return null;
-  if (p.endsWith("/index.md")) u.pathname = p.slice(0, -"index.md".length);
-  else if (p === "/.md") u.pathname = "/"; // parallel.ai's root twin
-  else u.pathname = p.slice(0, -".md".length); // also .html.md -> .html
-  return u.href;
-}
+export { strippedPage };
 
 const pages = new Map<string, Promise<string | null>>();
 
@@ -165,8 +108,7 @@ export function humanPageFor(mdUrl: string): Promise<string | null> {
     try {
       let r = await ask("HEAD");
       if (r.status === 405 || r.status === 501) r = await ask("GET"); // a server that refuses HEAD
-      const type = (r.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-      if (!r.ok || type !== "text/html") return null;
+      if (!r.ok || mediaType(r.headers.get("content-type")) !== "text/html") return null;
       const final = new URL(r.url || candidate);
       return final.origin === new URL(candidate).origin ? pageKey(final.href) : null;
     } catch {
@@ -175,9 +117,4 @@ export function humanPageFor(mdUrl: string): Promise<string | null> {
   })();
   pages.set(key, p);
   return p;
-}
-
-/** file a copy under a second address, so reload, back and Human find it there */
-export function alias(pageUrl: string, copy: Promise<MachineCopy | null>): void {
-  cache.set(pageKey(pageUrl), copy);
 }

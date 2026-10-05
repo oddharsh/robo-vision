@@ -44,7 +44,9 @@ if (flags.has("--help") || flags.has("-h") || urls[0] !== "check" || urls.length
 const MARK = { error: "error", warn: "warn ", info: "info " } as const;
 
 function print(r: Report) {
-  console.log(`\n${r.url}  (HTML ${r.page.status ?? "unreachable"}, ${(r.page.chars / 1024).toFixed(0)} KB)`);
+  console.log(r.kind === "file"
+    ? `\n${r.url}  (a Markdown file, HTTP ${r.page.status ?? "unreachable"})`
+    : `\n${r.url}  (HTML ${r.page.status ?? "unreachable"}, ${(r.page.chars / 1024).toFixed(0)} KB)`);
   for (const d of r.doors) {
     // a region on the page takes no request, so it leaves no attempt behind
     if (d.copy && !d.attempts.length) console.log(`  HIT  ${d.step.padEnd(14)}   ${d.copy.text.length} chars on the page, shown to visitors`);
@@ -56,6 +58,8 @@ function print(r: Report) {
   console.log(!r.served ? "  => agents are served HTML"
     : flaky ? `  => agents are served HTML or ${r.served.text.length.toLocaleString("en")} chars of Markdown, whichever the cache holds`
     : `  => agents are served ${r.served.text.length.toLocaleString("en")} chars of Markdown by ${r.served.step}`);
+  // no rule can say whether the Markdown is about the page; a glance can
+  if (r.served) console.log(`     starts ${JSON.stringify(r.served.text.trim().replace(/\s+/g, " ").slice(0, 70))}`);
   for (const f of r.findings) console.log(`  ${MARK[f.severity]} ${f.rule}: ${f.message}${f.url ? `\n        ${f.url}` : ""}`);
 }
 

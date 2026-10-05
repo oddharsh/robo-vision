@@ -8,19 +8,22 @@ src/source.ts       find an existing machine copy; the judgement is rejectReason
 src/generate.ts     last resort: live DOM to Markdown
 src/mode.ts         headless state: html[data-robo-vision-mode], storage, ?robo-vision=
 src/mode-toggle.ts  <mode-toggle>, semantics only
+src/session.ts      which page the pane is on: links, Human, Back, the .md rule
 src/base.css        the only CSS robo-vision ships: integrity rules, plus a
                     neutral look any site CSS for its classes beats
 src/copies.ts       the data layer: a copy for any same-origin URL, no rendering
 src/view.ts         the lazy half: renderPane(), plus copies.ts re-exported
 src/drop-in.ts      zero-markup mode: a docked toggle and a top-layer overlay
 src/facts-html.ts   the page's declarations read from HTML text, where there is no DOM
+src/facts-dom.ts    the same, read off a live Document; browser only, never published
 src/check.ts        the audit: every door opened, the answers compared, faults named
+src/memory.ts       what an origin has shown: the door that worked, sections that serve nothing
+src/reroute.ts      a 404, and which of the origin's real pages it meant
 src/resolve.ts      the package's DOM-free entry, plus fetchMachineCopy() for agents
 src/cli.ts          robo-vision check <url>
 scripts/build.ts    dist/robo-vision.js (+ chunks/) lazy, dist/robo-vision.eager.js single file,
                     dist/resolve.js and dist/cli.js for Node
 demo/serve.ts       six server behaviours, one page       bun demo/serve.ts 8841
-probe.ts            the resolver against live sites      bun probe.ts <url>...
 dryrun/             drop robo-vision into 34 live sites in real Chrome
 test/               bun test (the generator tests drive real Chrome)
 ```
@@ -41,6 +44,22 @@ scheme through system colors, and reads `--rv-bg`, `--rv-fg`, `--rv-accent`,
 `--rv-accent-fg`, `--rv-border`, `--rv-radius`, `--rv-font`, `--rv-mono` and a
 few more from any ancestor, `:root` included. Labels, titles and the corner are
 attributes.
+
+To know what the pane shows, read the toggle rather than the pane:
+
+```js
+document.addEventListener("robo-vision:shown", (e) => {
+  // e.detail: { kind: "loading" | "copy" | "error", url, copy?, message? }
+  if (e.detail.kind === "copy") analytics.track("machine-view", { door: e.detail.copy.step, served: e.detail.copy.served });
+});
+document.querySelector("mode-toggle").shown; // the same value, now
+```
+
+The event bubbles from the toggle, so a drop-in site hears it on `document`.
+`copy` carries the text, the door that found it, whether agents are served
+it, and each attempt with a verdict code. The pane's markup is for styling:
+its classes and `data-filled` / `data-url` are stable hooks for CSS, and its
+wording can change in any release.
 
 For anything the variables do not cover, a site writes ordinary CSS for
 `.rv-dock`, `.mt`, `.mt__btn`, `.mv__well` and friends. Every base look rule
@@ -92,16 +111,74 @@ it answers a browser.
 ```ts
 import { fetchMachineCopy } from "robo-vision/resolve";
 
-const { copy, html } = await fetchMachineCopy(url);
-const text = copy ? copy.text : myOwnHtmlToText(html);
+const r = await fetchMachineCopy(url);
+if (r.copy) use(r.copy.text);                 // the site's own Markdown
+else if (r.suggestions?.length) pick(r.suggestions); // a 404, and the real pages it may have meant
+else use(myOwnHtmlToText(r.html));
 ```
 
 One request for the page, then one to three for its copy. `copy` is the site's
-own Markdown and has passed `rejectReason()`, so an app shell answering 200 at
-`/x.md` and HTML under a Markdown label both come back as `null`. `html` is the
-page it had to fetch anyway. The same entry exports `resolveMachineCopy`,
-`surveyMachineCopies`, `checkPage` and `factsFromHtml`; none of them touch a
-DOM, and they run in Node 18+, Bun and Workers.
+own Markdown and has passed `judge()`, so an app shell answering 200 at `/x.md`
+and HTML under a Markdown label both come back as `null`. `html` is the page it
+had to fetch anyway. Nothing here touches a DOM: it runs in Node 18+, Bun and
+Workers.
+
+**It remembers each origin** for an hour, in a Map: the door that served last
+is asked first, and a section that served nothing is not asked again. A site
+that serves `.md` twins costs 2 requests a page after the first. Pass
+`memory: originMemory(store)` to keep it elsewhere (any `get`/`set` of strings),
+or `memory: null`.
+
+**On a 404 it reads the site's page list** and does one of two things:
+
+| the URL | result |
+|---|---|
+| differs from exactly one real page by case, a trailing slash, `.html` or `/index` | that page is read, and `rerouted` says what was fixed |
+| anything fuzzier: a typo, a renamed page | nothing is followed; `suggestions` ranks real pages with a score |
+
+The list is `llms.txt` by default (one request, with titles) plus the links in
+copies already read on that origin. `reroute: { pages: ["llms", "sitemap"] }`
+adds the sitemap, found through `robots.txt`, then `/sitemap.xml`, then
+`/sitemap-index.xml`, with indexes walked and reads capped at 5 MB.
+`reroute: false` returns the bare 404.
+
+The candidates are a closed set: a chooser ranks the origin's own pages and
+anything else it returns is dropped. The built-in chooser scores spelling,
+which catches typos and misses synonyms (`/jobs` for `/careers`). For those,
+plug in a decision model, the way [ry](https://github.com/ygwyg/ry) uses
+Cloudflare's Clef for visitors:
+
+```ts
+import { fetchMachineCopy, type Chooser } from "robo-vision/resolve";
+
+const clef: Chooser = async (missing, options) => {
+  const out = await env.AI.run("@cf/cloudflare/clef-flash", {
+    question: `Which page did a request for ${new URL(missing).pathname} mean?`,
+    options: options.map((o) => ({ id: o.url, label: o.title ?? new URL(o.url).pathname })),
+  });
+  return options.map((o) => ({ ...o, score: out.probabilities[o.url] ?? 0 }));
+};
+await fetchMachineCopy(url, { reroute: { chooser: clef } });
+```
+
+(The request shape above is illustrative; check Clef's docs for the current
+one.) Any classifier fits: the seam is options in, a score per option out.
+
+Nothing in this depends on the site's host. It reads a status code, `llms.txt`
+and sitemaps, which every host serves the same way. Measured 2026-10-02 on 20
+docs sites (9 Vercel, 4 Netlify, 5 Cloudflare, 2 other): all 20 answered a
+missing page with a real 404, so none hid a miss behind a 200.
+`bun test/hosts.live.ts` reruns a sample from each:
+
+| host | site | asked for | result |
+|---|---|---|---|
+| Vercel | nextjs.org | `.../instalation` | suggested `.../installation`, 0.984 |
+| Vercel | react.dev | `/learn/thinking-in-reakt` | suggested `/learn/thinking-in-react`, 0.968 |
+| Netlify | docs.netlify.com | `.../environment-variabls` | suggested `.../environment-variables`, 0.988 |
+| Netlify | vuejs.org | `/guide/Introduction` | the host answers it (200) |
+| Cloudflare | hono.dev | `.../cloudflare-worker` | suggested `.../cloudflare-workers`, 0.985 |
+| Cloudflare | developers.cloudflare.com | `.../fetch-handler` | suggested `/workers/runtime-apis/handlers/`, 0.81 |
+| Cloudflare | docs.astro.build | `.../instalation/` | weak: the page is `/en/install-and-setup/`, a rename a model catches and spelling does not |
 
 ## Overhead
 
@@ -111,7 +188,7 @@ and without the script tag:
 
 | stage | cost |
 |---|---|
-| every page view | 1 request, 9,334 B (3.6 KB gzip), mounted after load on idle; +0 to 2 ms script, +1 to 14 ms main thread, CLS unchanged, load and LCP within noise; **no requests to the site** |
+| every page view | 1 request, 10,115 B (4.0 KB gzip), mounted after load on idle; +0 to 2 ms script, +1 to 14 ms main thread, CLS unchanged, load and LCP within noise; **no requests to the site** |
 | first hover or focus | 2 requests, the view code, 13.2 KB (5.9 KB gzip) |
 | clicking Machine | 1 to 4 requests to the site, median 267 ms to a served copy; generation itself 2 ms median, 15 ms worst (Wikipedia) |
 | a section serving nothing | its first page pays the lookups; the rest of it, for the session, none |
@@ -128,9 +205,8 @@ No runtime dependencies, just bun (TypeScript is there to emit declarations).
 ```
 bun test
 bun run build                     # dist/, everything the npm package ships
-bun run check https://parallel.ai/
+bun run check https://parallel.ai/ https://www.cloudflare.com/connect/ https://konghq.com/
 bun run demo                      # http://localhost:8841
-bun run probe https://parallel.ai/ https://www.cloudflare.com/connect/ https://konghq.com/
 ```
 
 ## What the three sites built (probed 2026-09-23)
@@ -147,7 +223,8 @@ toggle doesn't show that Markdown.
 
 ## Resolution order
 
-in-page, link-alternate, negotiated, md-suffix, generated. A fetched step hits
+in-page, link-alternate, negotiated, md-suffix, generated. A URL that is itself a `.md` file is
+answered by the file alone (`md-url`), in one request. A fetched step hits
 on the response BODY and TYPE, never the status: both traps answer 200 (a
 URL-keyed cache returning the page's HTML, a SPA shell answering `/x.md`).
 
@@ -209,9 +286,12 @@ Fetching and rendering are separate modules. `copies.ts` returns a copy for
 any same-origin URL without loading or drawing it, caches by URL, and
 remembers which step this origin serves copies by, so after one `.md` hit the
 next page is asked for its `.md` first. `renderPane()` draws a copy and never
-fetches. They meet only at a link: hovering it fetches, clicking renders. A
-page that serves no copy is loaded for real, still carrying the param, and
-generates from its own DOM. Back and forward re-render from the cache; on
+fetches. Between them, `session.ts` decides which page the pane is on: a
+hovered link asks it to fetch ahead, a click asks it to go there, and Human and
+Back ask it which page to land on. It reaches the browser only through three
+adapters (history, copies, the mode attribute), so its rules run in `bun test`
+against a recorder. A page that serves no copy is loaded for real, still
+carrying the param, and generates from its own DOM. Back and forward re-render from the cache; on
 Parallel, Cloudflare's docs and react.dev, Back caused no reload.
 
 Some sites link one Markdown file to another (Stripe's copies point at

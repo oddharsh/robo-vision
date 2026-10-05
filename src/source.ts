@@ -13,15 +13,20 @@
 //   md-suffix       the llms.txt convention: /foo -> /foo.md, / -> /index.html.md.
 //   generated       nothing exists, so walk the DOM we already have.
 //
+// A URL that is itself a .md file is the one exception: it is answered by
+// the file alone, the md-url door. Every other door would repeat it (asking
+// the same URL again), or has nothing to work with (no page, so no facts and
+// no suffix).
+//
 // Every step that fetches is judged on the RESPONSE rather than the status
 // code, because the two failures that matter both answer 200: a URL-keyed
 // cache handing back the HTML it stored for the page, and a SPA fallback
 // answering /anything.md with the app shell. Neither is a twin, and treating
 // either as one would show a human "what the machine sees" as a page of markup.
 
-import { BUST_PARAM } from "./params.ts";
+import { BUST_PARAM, isMarkdownUrl } from "./params.ts";
 
-export type Step = "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated" | "md-link";
+export type Step = "md-url" | "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated";
 
 /** what a fetched response turned out to be. A code, because check.ts decides
  *  on it; `reason` beside it is a sentence for people and free to be reworded */
@@ -87,23 +92,50 @@ export { BUST_PARAM };
 
 const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown"]);
 
+/**
+ * A media type that names Markdown, from a Content-Type header or a <link>'s
+ * type attribute alike: parameters dropped, case ignored, so
+ * `text/markdown; charset=utf-8` counts wherever `text/markdown` does.
+ */
+export function isMarkdownType(type: string | null | undefined): boolean {
+  return MARKDOWN_TYPES.has(mediaType(type));
+}
+
+/** a Content-Type header or type attribute as its bare media type */
+export function mediaType(header: string | null | undefined): string {
+  return (header ?? "").split(";")[0].trim().toLowerCase();
+}
+
+/**
+ * Whether a body is an HTML document, whatever it was labelled. Skips a BOM
+ * and any leading comments first: Shopify storefronts answer Accept:
+ * text/markdown with `text/markdown` over the full HTML page, and a theme that
+ * opens with <!-- BRAND --> put 664 KB of markup past a sniff that only looked
+ * at the first tag (allbirds.com, 2026-09-23). Then only the four tags that
+ * open a whole document count: Markdown may begin with inline HTML (a README's
+ * centred <div>), and that is still a copy.
+ */
+export function looksLikeHtml(body: string): boolean {
+  const lead = body.slice(0, 4096).replace(/^\uFEFF/, "").replace(/^(?:\s*<!--[\s\S]*?-->)*\s*/, "");
+  return /^<(?:!doctype|html|head|body)\b/i.test(lead);
+}
+
+/** A status that says the answer failed to arrive (a 5xx, a 429, a 408), not
+ *  what the site has: worth asking again, never worth remembering. */
+export const failedStatus = (s: number) => s >= 500 || s === 429 || s === 408;
+
 /** Judge a response as a Markdown twin: null on a hit, or what it is instead. */
 export function judge(res: Response, body: string, url: string): { verdict: Exclude<Verdict, "markdown" | "fetch-failed">; reason: string } | null {
   if (!res.ok) return { verdict: "http-error", reason: `HTTP ${res.status}` };
-  const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  const type = mediaType(res.headers.get("content-type"));
   const isMdPath = /\.md(?:$|[?#])/.test(new URL(url).pathname + new URL(url).search);
   // text/plain is how a plain static host serves a .md file it has no type for,
   // so it counts only where the URL itself says Markdown
-  if (!MARKDOWN_TYPES.has(type) && !(type === "text/plain" && isMdPath)) {
+  if (!isMarkdownType(type) && !(type === "text/plain" && isMdPath)) {
     return { verdict: "not-markdown", reason: type ? `answered ${type}` : "no content-type" };
   }
-  // a typed-right response can still be a document: sniff before believing it.
-  // Skip a BOM and any leading comments first: Shopify storefronts answer
-  // Accept: text/markdown with `text/markdown` over the full HTML page, and a
-  // theme that opens with <!-- BRAND --> put 664 KB of markup past a sniff
-  // that only looked at the first tag (allbirds.com, 2026-09-23)
-  const lead = body.slice(0, 4096).replace(/^\uFEFF/, "").replace(/^(?:\s*<!--[\s\S]*?-->)*\s*/, "");
-  if (/^<(?:!doctype|html|head|body)\b/i.test(lead)) return { verdict: "html-body", reason: "labelled Markdown, body is HTML" };
+  // a typed-right response can still be a document: sniff before believing it
+  if (looksLikeHtml(body)) return { verdict: "html-body", reason: "labelled Markdown, body is HTML" };
   if (!body.trim()) return { verdict: "empty-body", reason: "empty body" };
   return null;
 }
@@ -130,6 +162,17 @@ export function suffixCandidates(pageUrl: string): string[] {
     return [base ? `${base}.md` : "/index.md", `${p}index.html.md`].map((x) => new URL(x, u).href);
   }
   return [new URL(`${p.replace(/\.html?$/, "")}.md`, u).href];
+}
+
+/** "/x.md" -> "/x", by the llms.txt spellings; null if it is not a .md URL */
+export function strippedPage(mdUrl: string): string | null {
+  const u = new URL(mdUrl);
+  const p = u.pathname;
+  if (!p.endsWith(".md")) return null;
+  if (p.endsWith("/index.md")) u.pathname = p.slice(0, -"index.md".length);
+  else if (p === "/.md") u.pathname = "/"; // parallel.ai's root twin
+  else u.pathname = p.slice(0, -".md".length); // also .html.md -> .html
+  return u.href;
 }
 
 /** every door, cheapest and most explicit first */
@@ -188,7 +231,12 @@ async function* walk(pageUrl: string, opts: ResolveOptions): AsyncGenerator<Door
 
   const facts = opts.facts;
 
-  const open: Record<Exclude<Step, "md-link">, (attempts: Attempt[]) => Promise<MachineCopy | null>> = {
+  const open: Record<Step, (attempts: Attempt[]) => Promise<MachineCopy | null>> = {
+    "md-url": async (attempts) => {
+      const { copy } = await tryFetch(attempts, "md-url", pageUrl, md("text/markdown, text/plain;q=0.5"));
+      return copy;
+    },
+
     "in-page": async (attempts) => {
       if (facts?.inPage?.trim()) return { step: "in-page", served: false, url: null, contentType: null, text: facts.inPage, attempts };
       attempts.push({ step: "in-page", url: null, hit: false, reason: facts ? "no machine region" : "no page facts" });
@@ -251,8 +299,9 @@ async function* walk(pageUrl: string, opts: ResolveOptions): AsyncGenerator<Door
     },
   };
 
-  for (const step of opts.order ?? ORDER) {
-    if (step === "md-link") continue;
+  // a .md URL is answered by the file alone, whatever order was asked for
+  const doors = isMarkdownUrl(pageUrl) ? (["md-url"] as Step[]) : (opts.order ?? ORDER).filter((s) => s !== "md-url");
+  for (const step of doors) {
     const attempts: Attempt[] = [];
     if (why.has(step)) {
       const reason = why.get(step);
@@ -285,14 +334,4 @@ export async function surveyMachineCopies(pageUrl: string, opts: ResolveOptions 
   const doors: Door[] = [];
   for await (const door of walk(pageUrl, opts)) doors.push(door);
   return doors;
-}
-
-/** read PageFacts off a live Document (browser side) */
-export function factsFromDocument(doc: Document, machineRegion = "[data-machine-only]"): PageFacts {
-  const alternates = [...doc.querySelectorAll<HTMLLinkElement>('link[rel~="alternate" i][type]')]
-    .filter((l) => MARKDOWN_TYPES.has(l.type.toLowerCase()))
-    .map((l) => l.getAttribute("href")!)
-    .filter(Boolean);
-  const region = doc.querySelector<HTMLElement>(machineRegion);
-  return { alternates, inPage: region ? region.innerText || region.textContent : null };
 }

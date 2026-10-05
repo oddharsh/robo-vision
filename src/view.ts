@@ -8,14 +8,13 @@
 // click lands the code is usually already here.
 //
 // Fetching and rendering stay apart. copies.ts gets a copy for a URL and never
-// touches the DOM; renderPane() draws one and never fetches. The only place
-// they meet is a link in the pane: hovering fetches that page's copy, clicking
-// hands the URL back to the toggle, which decides how to show it.
+// touches the DOM; renderPane() draws one and never fetches. A link in the pane
+// hands its URL back through two callbacks: hovering asks to fetch ahead,
+// clicking asks to go there. What either means is session.ts's call.
 
 import type { MachineCopy, Step } from "./source.ts";
 
-export { copyFor, copyForThisPage, humanPageFor, alias, type MachineCopy } from "./copies.ts";
-import { copyFor, humanPageFor } from "./copies.ts";
+export { copyFor, copyForThisPage, humanPageFor, type MachineCopy } from "./copies.ts";
 
 const STEP_LABEL: Record<Step, string> = {
   "in-page": "the page's own machine region",
@@ -23,7 +22,7 @@ const STEP_LABEL: Record<Step, string> = {
   "negotiated": "same URL, Accept: text/markdown",
   "md-suffix": ".md next to the page",
   "generated": "generated here from the live page",
-  "md-link": "a .md file, linked from the last copy",
+  "md-url": "a Markdown file, read as itself",
 };
 
 export interface RenderOptions {
@@ -31,6 +30,8 @@ export interface RenderOptions {
   page: string;
   /** a same-origin link was followed inside the pane */
   navigate?: (url: string) => void;
+  /** a same-origin link was hovered or focused: fetch ahead, draw nothing */
+  prefetch?: (url: string) => void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
@@ -57,7 +58,7 @@ function linkify(text: string, opts: RenderOptions): DocumentFragment {
     frag.append(text.slice(last, at));
     const a = el("a", "mv__link", target);
     a.href = url.href;
-    if (url.origin === location.origin && opts.navigate) wireSameOrigin(a, url.href, opts.navigate);
+    if (url.origin === location.origin && opts.navigate) wireSameOrigin(a, url.href, opts.navigate, opts.prefetch);
     frag.append(a);
     last = at + target.length;
   }
@@ -65,13 +66,11 @@ function linkify(text: string, opts: RenderOptions): DocumentFragment {
   return frag;
 }
 
-function wireSameOrigin(a: HTMLAnchorElement, url: string, navigate: (url: string) => void) {
+function wireSameOrigin(a: HTMLAnchorElement, url: string, navigate: (url: string) => void, prefetch?: (url: string) => void) {
   // intent fetches; only a click renders. A short dwell keeps a pointer that
   // merely crosses the link from costing the site a request.
   let timer = 0;
-  // a .md link also has its page verified early, so the click can go straight
-  // to the right address
-  const fetchAhead = () => { void copyFor(url); if (new URL(url).pathname.endsWith(".md")) void humanPageFor(url); };
+  const fetchAhead = () => prefetch?.(url);
   a.addEventListener("pointerenter", () => { timer = window.setTimeout(fetchAhead, 80); });
   a.addEventListener("pointerleave", () => clearTimeout(timer));
   a.addEventListener("focus", fetchAhead);

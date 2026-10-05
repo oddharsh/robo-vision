@@ -32,10 +32,10 @@
     "test": "bun test",
     "demo": "bun demo/serve.ts 8841",
     "check": "bun src/cli.ts check",
-    "probe": "bun probe.ts",
     "prepublishOnly": "bun scripts/build.ts"
   },
   "devDependencies": {
+    "@types/node": "22",
     "playwright-core": "1.63.0",
     "typescript": "^7.0.2"
   }

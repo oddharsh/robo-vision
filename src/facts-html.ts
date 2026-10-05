@@ -1,15 +1,13 @@
 // facts-html.ts: PageFacts from HTML text, where there is no Document.
 //
-// The browser reads them off the live DOM (factsFromDocument). A CLI, a CI job
+// The browser reads them off the live DOM (facts-dom.ts). A CLI, a CI job
 // or an agent has only the first response's markup, which is also the honest
 // input for them: it is the page before any script ran, and that is the page a
 // fetcher receives. A tag scanner rather than a parser, so it runs unchanged
 // in Node, Bun and a Worker with nothing to install. It needs two things only:
 // <link rel="alternate" type="text/markdown"> and the text of one region.
 
-import type { PageFacts } from "./source.ts";
-
-const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown"]);
+import { isMarkdownType, type PageFacts } from "./source.ts";
 
 // a comment, a whole script or style element, or one tag
 const TOKEN = /<!--[\s\S]*?-->|<(script|style)\b[\s\S]*?<\/\1\s*>|<(\/?)([a-zA-Z][\w:-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/gi;
@@ -59,7 +57,7 @@ export function factsFromHtml(html: string, machineRegion = "data-machine-only")
     if (tag === "link") {
       const rel = (a.get("rel") ?? "").toLowerCase().split(/\s+/);
       const href = a.get("href");
-      if (href && rel.includes("alternate") && MARKDOWN_TYPES.has((a.get("type") ?? "").toLowerCase())) alternates.push(href);
+      if (href && rel.includes("alternate") && isMarkdownType(a.get("type"))) alternates.push(href);
     }
     // the first region only, as querySelector takes the first in the browser
     if (inPage === null && a.has(machineRegion)) region = { tag, depth: 1, from: at + token.length, text: "" };

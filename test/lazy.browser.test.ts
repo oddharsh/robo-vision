@@ -91,16 +91,22 @@ test("clicking Machine fills the pane from the lazy view", async () => {
   const { page, log } = await open();
   const before = chunks(log).length;
   expect(before).toBe(0);
+  // a listener on document hears the drop-in's toggle, which the page never held
+  await page.evaluate(() => document.addEventListener("robo-vision:shown", (e) => {
+    ((window as unknown as { __shown: string[] }).__shown ??= []).push((e as CustomEvent<{ kind: string }>).detail.kind);
+  }));
   await page.click('[data-robo-vision] .mt__btn[data-mode="machine"]');
-  await page.waitForSelector("#robo-vision-pane[data-filled]");
+  await page.waitForSelector("#robo-vision-pane[data-filled]"); // the styling hook is still set
   const pane = await page.evaluate(() => ({
-    step: (document.querySelector("#robo-vision-pane") as HTMLElement).dataset.filled,
+    heard: (window as unknown as { __shown: string[] }).__shown,
+    step: (document.querySelector("mode-toggle") as unknown as { shown: { copy: { step: string } } }).shown.copy.step,
     text: document.querySelector("#robo-vision-pane pre")?.textContent ?? "",
     font: getComputedStyle(document.querySelector("#robo-vision-pane pre")!).fontFamily,
     wrap: getComputedStyle(document.querySelector("#robo-vision-pane pre")!).whiteSpace,
   }));
+  expect(pane.heard).toEqual(["loading", "copy"]);
   expect(pane.step).toBe("generated");
-  expect(pane.text).toContain("# Lazy");
+  expect(pane.text).toContain("# Lazy"); // the shown copy is the one drawn
   expect(pane.font).toContain("monospace"); // the pane's base styles arrived with the view
   expect(pane.wrap).toBe("pre-wrap");
   await page.context().close();
