@@ -23,7 +23,7 @@
 import { resolveMachineCopy, factsFromDocument, strippedPage, type MachineCopy } from "./source.ts";
 import { originMemory } from "./memory.ts";
 import { generateMarkdown } from "./generate.ts";
-import { pageKey } from "./mode.ts";
+import { keyOf as pageKey, isMarkdownUrl } from "./params.ts";
 
 export type { MachineCopy };
 
@@ -58,7 +58,6 @@ export function copyForThisPage(page: string, opts: { exclude?: string[] } = {})
   return p;
 }
 
-const isMarkdownUrl = (url: string) => new URL(url).pathname.endsWith(".md");
 
 /** another same-origin page, fetched and never rendered; null if it serves nothing */
 export function copyFor(url: string): Promise<MachineCopy | null> {
@@ -134,9 +133,4 @@ export function humanPageFor(mdUrl: string): Promise<string | null> {
   })();
   pages.set(key, p);
   return p;
-}
-
-/** file a copy under a second address, so reload, back and Human find it there */
-export function alias(pageUrl: string, copy: Promise<MachineCopy | null>): void {
-  cache.set(pageKey(pageUrl), copy);
 }

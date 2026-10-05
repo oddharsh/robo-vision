@@ -17,19 +17,14 @@
 // through `loadView` on first use; the imports below from it are types only,
 // which the bundler erases.
 //
-// STAYING IN MACHINE VIEW. While machine mode is on, the address carries
-// ?robo-vision=machine, the way Parallel's machine view lives under /ai/, so a
-// reload, the back button or a pasted link keeps it. A same-origin link in the
-// pane does not load that page: its copy is fetched (copies.ts), drawn in the
-// pane, and the address moves with pushState. Only a page that serves no copy
-// is loaded for real, still carrying the param, and generates from its DOM.
+// Which page the pane is on, and what Human and Back do from there, is
+// session.ts. This element hands it the real history, the lazy copies and the
+// mode attribute, and draws what it is told to show.
 
-import type { MachineCopy } from "./view.ts";
-import { getMode, setMode, initMode, pageKey, withMode, EVENT, PARAM, type Mode } from "./mode.ts";
+import { getMode, setMode, initMode, EVENT, type Mode } from "./mode.ts";
+import { paneSession, type PaneSession, type Shown } from "./session.ts";
 
 export type ViewModule = typeof import("./view.ts");
-
-const isMarkdownUrl = (url: string) => new URL(url, location.href).pathname.endsWith(".md");
 
 export class ModeToggle extends HTMLElement {
   /** how the view code arrives; drop-in mode swaps in a loader that also
@@ -37,14 +32,27 @@ export class ModeToggle extends HTMLElement {
   loadView: () => Promise<ViewModule> = () => import("./view.ts");
 
   #view: Promise<ViewModule> | null = null;
+  /** the view once it has arrived; show() only draws copies it fetched */
+  #loaded: ViewModule | null = null;
   #buttons: HTMLButtonElement[] = [];
-  /** the page the browser actually loaded; pushState moves the address, not this */
-  #document = pageKey(location.href);
-  /** the render in flight, so a slow page cannot land over a newer one */
-  #showing = "";
-  /** the most recent address that is a real page, for Human to return to
-   *  from a Markdown-only document */
-  #lastPage = pageKey(location.href);
+  /** the page the browser loaded; after pushState, location is the pane's
+   *  address and no longer this */
+  #document = location.href;
+  #session: PaneSession = paneSession({
+    history: {
+      current: () => location.href,
+      push: (url) => history.pushState({ robo: true }, "", url),
+      replace: (url) => history.replaceState(history.state, "", url),
+      load: (url) => location.replace(url),
+    },
+    copies: () => this.#loadView().then((v) => ({
+      forDocument: () => v.copyForThisPage(this.#document, this.#opts()),
+      forUrl: v.copyFor,
+      pageBehind: v.humanPageFor,
+    })),
+    mode: { get: getMode, set: (m) => setMode(m) },
+    show: (s) => this.#draw(s),
+  });
 
   connectedCallback() {
     if (this.#buttons.length) return;
@@ -80,13 +88,10 @@ export class ModeToggle extends HTMLElement {
     this.addEventListener("pointerenter", prefetch, { once: true });
     this.addEventListener("focusin", prefetch, { once: true });
     document.addEventListener(EVENT, () => this.#sync());
-    window.addEventListener("popstate", () => this.#popstate());
-    const m = initMode();
+    window.addEventListener("popstate", () => void this.#session.popstate());
+    initMode();
     this.#sync();
-    if (m === "machine") {
-      this.#address("machine", "replace");
-      void this.#present(location.href);
-    }
+    void this.#session.start();
   }
 
   get pane(): HTMLElement | null {
@@ -94,47 +99,13 @@ export class ModeToggle extends HTMLElement {
     return id ? document.getElementById(id) : document.querySelector("[data-machine-view]");
   }
 
-  async choose(mode: Mode) {
-    if (mode === "human" && pageKey(location.href) !== this.#document) {
-      // a Markdown-only document has no human page: go back to the last real
-      // one rather than load the file itself as raw text
-      const target = isMarkdownUrl(location.href) ? this.#lastPage : pageKey(location.href);
-      setMode("human");
-      if (target === this.#document) {
-        // that page is the one still loaded under the pane: no reload needed
-        history.replaceState(history.state, "", withMode(target, "human"));
-        return;
-      }
-      // the pane moved to another page; its human view is a real load away
-      location.replace(withMode(target, "human"));
-      return;
-    }
-    // resolve BEFORE flipping: generation reads computed style, and once the
-    // human region is display:none there is nothing visible left to read
-    if (mode === "machine") await this.#loadView().then((v) => v.copyForThisPage(this.#document, this.#opts())).catch(() => {});
-    setMode(mode);
-    this.#address(mode, "replace");
-    if (mode === "machine") await this.#present(location.href);
+  choose(mode: Mode): Promise<void> {
+    return this.#session.choose(mode);
   }
 
   /** follow a same-origin link inside the pane */
-  async navigate(url: string) {
-    let address = url;
-    if (isMarkdownUrl(url)) {
-      // a link to a .md file: fetch it and, alongside, ask whether the page it
-      // mirrors exists. Only a verified page goes in the address bar
-      const pane = this.pane;
-      pane?.setAttribute("aria-busy", "true");
-      const view = await this.#loadView();
-      const [page] = await Promise.all([view.humanPageFor(url), view.copyFor(url)]);
-      if (page) {
-        view.alias(page, view.copyFor(url));
-        address = page;
-      }
-    }
-    if (!isMarkdownUrl(address)) this.#lastPage = pageKey(address);
-    history.pushState({ robo: true }, "", withMode(address, "machine"));
-    await this.#present(address);
+  navigate(url: string): Promise<void> {
+    return this.#session.open(url);
   }
 
   #opts() {
@@ -143,65 +114,33 @@ export class ModeToggle extends HTMLElement {
 
   #loadView(): Promise<ViewModule> {
     // a failed load is not cached, so a flaky network gets another try
-    this.#view ??= this.loadView().catch((e) => { this.#view = null; throw e; });
+    this.#view ??= this.loadView().then((v) => (this.#loaded = v)).catch((e) => { this.#view = null; throw e; });
     return this.#view;
   }
 
-  #address(mode: Mode, how: "replace" | "push") {
-    const next = withMode(location.href, mode);
-    if (next === location.href) return;
-    if (how === "push") history.pushState(history.state, "", next);
-    else history.replaceState(history.state, "", next);
-  }
-
-  // back and forward move between pages the pane showed and the page the
-  // browser loaded; anything else has to be loaded for real
-  #popstate() {
-    const url = new URL(location.href);
-    if (!isMarkdownUrl(url.href)) this.#lastPage = pageKey(url.href);
-    const machine = url.searchParams.get(PARAM) === "machine";
-    const here = pageKey(url.href) === this.#document;
-    if (machine) {
-      if (getMode() !== "machine") setMode("machine");
-      void this.#present(url.href);
-    } else if (here) {
-      if (getMode() !== "human") setMode("human");
-    } else {
-      location.reload();
-    }
-  }
-
-  async #present(url: string) {
+  #draw(s: Shown) {
     const pane = this.pane;
     if (!pane) return;
-    const key = pageKey(url);
-    if (pane.dataset.url === key && pane.dataset.filled) return this.#show(pane, true);
-    this.#showing = key;
-    this.#show(pane, true);
-    pane.setAttribute("aria-busy", "true");
-    pane.replaceChildren(Object.assign(document.createElement("p"), { className: "mv__loading", textContent: "Reading the machine copy…" }));
-    try {
-      const view = await this.#loadView();
-      const copy: MachineCopy | null = key === this.#document
-        ? await view.copyForThisPage(this.#document, this.#opts())
-        : await view.copyFor(key);
-      if (this.#showing !== key) return; // superseded by a newer navigation
-      if (!copy) {
-        // serves nothing we can fetch: load it for real, still in machine
-        // mode, and let that page generate from its own DOM
-        location.replace(withMode(key, "machine"));
-        return;
-      }
-      pane.dataset.filled = copy.step;
-      pane.dataset.url = key;
-      pane.replaceChildren(view.renderPane(copy, { page: key, navigate: (u) => void this.navigate(u) }));
-      pane.scrollTop = 0;
-    } catch (e) {
-      delete pane.dataset.filled;
-      pane.replaceChildren(Object.assign(document.createElement("p"), { className: "mv__error", textContent: `No machine copy: ${(e as Error).message}` }));
-    } finally {
-      pane.removeAttribute("aria-busy");
+    const note = (className: string, textContent: string) => Object.assign(document.createElement("p"), { className, textContent });
+    if (s.kind === "loading") {
+      pane.setAttribute("aria-busy", "true");
+      pane.replaceChildren(note("mv__loading", "Reading the machine copy…"));
+      return;
     }
+    pane.removeAttribute("aria-busy");
+    if (s.kind === "error") {
+      delete pane.dataset.filled;
+      pane.replaceChildren(note("mv__error", `No machine copy: ${s.message}`));
+      return;
+    }
+    pane.dataset.filled = s.copy.step;
+    pane.dataset.url = s.url;
+    pane.replaceChildren(this.#loaded!.renderPane(s.copy, {
+      page: s.url,
+      navigate: (u) => void this.#session.open(u),
+      prefetch: (u) => this.#session.prefetch(u),
+    }));
+    pane.scrollTop = 0;
   }
 
   #sync() {

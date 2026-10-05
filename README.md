@@ -8,6 +8,7 @@ src/source.ts       find an existing machine copy; the judgement is rejectReason
 src/generate.ts     last resort: live DOM to Markdown
 src/mode.ts         headless state: html[data-robo-vision-mode], storage, ?robo-vision=
 src/mode-toggle.ts  <mode-toggle>, semantics only
+src/session.ts      which page the pane is on: links, Human, Back, the .md rule
 src/base.css        the only CSS robo-vision ships: integrity rules, plus a
                     neutral look any site CSS for its classes beats
 src/copies.ts       the data layer: a copy for any same-origin URL, no rendering
@@ -171,7 +172,7 @@ and without the script tag:
 
 | stage | cost |
 |---|---|
-| every page view | 1 request, 9,334 B (3.6 KB gzip), mounted after load on idle; +0 to 2 ms script, +1 to 14 ms main thread, CLS unchanged, load and LCP within noise; **no requests to the site** |
+| every page view | 1 request, 10,115 B (4.0 KB gzip), mounted after load on idle; +0 to 2 ms script, +1 to 14 ms main thread, CLS unchanged, load and LCP within noise; **no requests to the site** |
 | first hover or focus | 2 requests, the view code, 13.2 KB (5.9 KB gzip) |
 | clicking Machine | 1 to 4 requests to the site, median 267 ms to a served copy; generation itself 2 ms median, 15 ms worst (Wikipedia) |
 | a section serving nothing | its first page pays the lookups; the rest of it, for the session, none |
@@ -269,9 +270,12 @@ Fetching and rendering are separate modules. `copies.ts` returns a copy for
 any same-origin URL without loading or drawing it, caches by URL, and
 remembers which step this origin serves copies by, so after one `.md` hit the
 next page is asked for its `.md` first. `renderPane()` draws a copy and never
-fetches. They meet only at a link: hovering it fetches, clicking renders. A
-page that serves no copy is loaded for real, still carrying the param, and
-generates from its own DOM. Back and forward re-render from the cache; on
+fetches. Between them, `session.ts` decides which page the pane is on: a
+hovered link asks it to fetch ahead, a click asks it to go there, and Human and
+Back ask it which page to land on. It reaches the browser only through three
+adapters (history, copies, the mode attribute), so its rules run in `bun test`
+against a recorder. A page that serves no copy is loaded for real, still
+carrying the param, and generates from its own DOM. Back and forward re-render from the cache; on
 Parallel, Cloudflare's docs and react.dev, Back caused no reload.
 
 Some sites link one Markdown file to another (Stripe's copies point at

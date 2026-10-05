@@ -14,3 +14,15 @@ export function keyOf(url: string): string {
   u.searchParams.delete(BUST_PARAM);
   return u.href;
 }
+
+/** the same absolute URL, carrying the mode the way Parallel's /ai prefix does:
+ *  a reload, a back button or a pasted link stays in machine view */
+export function withParam(url: string, mode: "human" | "machine"): string {
+  const u = new URL(url);
+  if (mode === "machine") u.searchParams.set(PARAM, "machine");
+  else u.searchParams.delete(PARAM);
+  return u.href;
+}
+
+/** a URL whose path names a Markdown file */
+export const isMarkdownUrl = (url: string) => new URL(url).pathname.endsWith(".md");
