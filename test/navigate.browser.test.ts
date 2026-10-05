@@ -66,11 +66,16 @@ async function site(): Promise<{ ctx: BrowserContext; log: string[] }> {
   return { ctx, log };
 }
 
+// what the pane holds, read through the toggle's interface, not its markup
+type ShownCopy = { kind: string; url: string; copy?: { step: string; text: string } };
 const pane = (p: Page) => p.evaluate(() => {
-  const el = document.querySelector("#robo-vision-pane") as HTMLElement;
-  return { url: el.dataset.url, step: el.dataset.filled, text: el.querySelector("pre")?.textContent ?? "", open: !el.hidden };
+  const s = (document.querySelector("mode-toggle") as unknown as { shown: ShownCopy | null }).shown;
+  return { url: s?.url, step: s?.copy?.step, text: s?.copy?.text ?? "", open: !(document.querySelector("#robo-vision-pane") as HTMLElement).hidden };
 });
-const settle = (p: Page, path: string) => p.waitForFunction((u) => (document.querySelector("#robo-vision-pane") as HTMLElement)?.dataset.url === u, `${O}${path}`);
+const settle = (p: Page, path: string) => p.waitForFunction((u) => {
+  const s = (document.querySelector("mode-toggle") as unknown as { shown: ShownCopy | null } | null)?.shown;
+  return s?.kind === "copy" && s.url === u;
+}, `${O}${path}`);
 const since = (log: string[], n: number) => log.slice(n);
 
 test("a link in the pane fetches that page's copy instead of loading the page", async () => {

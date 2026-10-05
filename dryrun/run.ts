@@ -244,8 +244,8 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
     }
 
     const done = await page.waitForFunction(() => {
-      const p = document.querySelector("#robo-vision-pane") as HTMLElement | null;
-      return p && (p.dataset.filled || p.querySelector(".mv__error")) ? true : false;
+      const s = (document.querySelector("mode-toggle") as unknown as { shown: { kind: string } | null } | null)?.shown;
+      return s?.kind === "copy" || s?.kind === "error";
     }, null, { timeout: 30_000 }).then(() => true, () => false);
     r.fillMs = Date.now() - tClick;
     // what of ours was fetched before anyone showed intent, and what after
@@ -258,18 +258,21 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
     r.fetches = await page.evaluate(() => (window as unknown as { __rv: { fetches: unknown[] } }).__rv.fetches);
     if (!done) find("machine view never filled in 30s");
 
+    // the data comes from toggle.shown; only the box is measured off the pane
     const pane = await page.evaluate(() => {
+      type A = { step: string; url: string | null; hit: boolean; verdict?: string; busted?: boolean; reason: string; ms?: number };
+      type S = { kind: "loading" | "copy" | "error"; url: string; message?: string; copy?: { step: string; served: boolean; text: string; attempts: A[] } };
+      const s = (document.querySelector("mode-toggle") as unknown as { shown: S | null }).shown;
       const p = document.querySelector("#robo-vision-pane") as HTMLElement;
-      const pre = p.querySelector("pre");
       const r = p.getBoundingClientRect();
       return {
         mode: document.documentElement.getAttribute("data-robo-vision-mode"),
         address: location.href,
-        step: p.dataset.filled ?? null,
-        error: p.querySelector(".mv__error")?.textContent ?? null,
-        status: [...p.querySelectorAll(".mv__cell")].map((c) => c.textContent),
-        attempts: [...p.querySelectorAll(".mv__attempts li")].map((li) => li.textContent!.trim()),
-        text: pre?.textContent ?? "",
+        step: s?.copy?.step ?? null,
+        served: s?.copy?.served ?? false,
+        error: s?.kind === "error" ? s.message ?? "" : null,
+        attempts: (s?.copy?.attempts ?? []).map(({ step, url, hit, verdict, busted, reason, ms }) => ({ step, url, hit, verdict, busted, reason, ms })),
+        text: s?.copy?.text ?? "",
         hidden: p.hidden,
         display: getComputedStyle(p).display,
         rect: { w: r.width, h: r.height },

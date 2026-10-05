@@ -45,6 +45,22 @@ scheme through system colors, and reads `--rv-bg`, `--rv-fg`, `--rv-accent`,
 few more from any ancestor, `:root` included. Labels, titles and the corner are
 attributes.
 
+To know what the pane shows, read the toggle rather than the pane:
+
+```js
+document.addEventListener("robo-vision:shown", (e) => {
+  // e.detail: { kind: "loading" | "copy" | "error", url, copy?, message? }
+  if (e.detail.kind === "copy") analytics.track("machine-view", { door: e.detail.copy.step, served: e.detail.copy.served });
+});
+document.querySelector("mode-toggle").shown; // the same value, now
+```
+
+The event bubbles from the toggle, so a drop-in site hears it on `document`.
+`copy` carries the text, the door that found it, whether agents are served
+it, and each attempt with a verdict code. The pane's markup is for styling:
+its classes and `data-filled` / `data-url` are stable hooks for CSS, and its
+wording can change in any release.
+
 For anything the variables do not cover, a site writes ordinary CSS for
 `.rv-dock`, `.mt`, `.mt__btn`, `.mv__well` and friends. Every base look rule
 has the specificity of one element (`button:where(.mt__btn)`), which sets the

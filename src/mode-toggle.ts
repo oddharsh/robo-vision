@@ -25,6 +25,11 @@ import { getMode, setMode, initMode, EVENT, type Mode } from "./mode.ts";
 import { paneSession, type PaneSession, type Shown } from "./session.ts";
 
 export type ViewModule = typeof import("./view.ts");
+export type { Shown };
+
+/** fired on the toggle whenever what the pane holds changes; it bubbles, so a
+ *  listener on document hears it from a drop-in toggle it never held */
+export const SHOWN_EVENT = "robo-vision:shown";
 
 export class ModeToggle extends HTMLElement {
   /** how the view code arrives; drop-in mode swaps in a loader that also
@@ -35,6 +40,7 @@ export class ModeToggle extends HTMLElement {
   /** the view once it has arrived; show() only draws copies it fetched */
   #loaded: ViewModule | null = null;
   #buttons: HTMLButtonElement[] = [];
+  #shown: Shown | null = null;
   /** the page the browser loaded; after pushState, location is the pane's
    *  address and no longer this */
   #document = location.href;
@@ -94,6 +100,17 @@ export class ModeToggle extends HTMLElement {
     void this.#session.start();
   }
 
+  /**
+   * What the pane holds: a copy, a lookup in flight, or an error, each with the
+   * page it is for. null until the pane is first used. It stays set while the
+   * pane is closed, since the pane still holds it. Read this, or listen for
+   * SHOWN_EVENT, rather than reading the pane's markup: the markup's classes
+   * are for styling, and its wording can change in any release.
+   */
+  get shown(): Shown | null {
+    return this.#shown;
+  }
+
   get pane(): HTMLElement | null {
     const id = this.getAttribute("for");
     return id ? document.getElementById(id) : document.querySelector("[data-machine-view]");
@@ -119,6 +136,13 @@ export class ModeToggle extends HTMLElement {
   }
 
   #draw(s: Shown) {
+    this.#shown = s;
+    this.#paint(s);
+    // after painting, so a listener that looks at the pane finds it drawn
+    this.dispatchEvent(new CustomEvent<Shown>(SHOWN_EVENT, { detail: s, bubbles: true }));
+  }
+
+  #paint(s: Shown) {
     const pane = this.pane;
     if (!pane) return;
     const note = (className: string, textContent: string) => Object.assign(document.createElement("p"), { className, textContent });
@@ -128,6 +152,8 @@ export class ModeToggle extends HTMLElement {
       return;
     }
     pane.removeAttribute("aria-busy");
+    // data-filled and data-url are styling hooks (a border for generated
+    // copies, say); toggle.shown is where the data is
     if (s.kind === "error") {
       delete pane.dataset.filled;
       pane.replaceChildren(note("mv__error", `No machine copy: ${s.message}`));

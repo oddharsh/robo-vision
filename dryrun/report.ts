@@ -5,7 +5,8 @@ const root = new URL("..", import.meta.url).pathname;
 type R = {
   url: string; stack: string; kind: string; agent: string; status: number | null; csp: string | null;
   findings: string[]; fillMs?: number; mounted?: boolean;
-  pane?: { step: string | null; chars: number; status: string[] };
+  // `status` is the scraped status bar of runs before toggle.shown existed
+  pane?: { step: string | null; chars: number; served?: boolean; status?: string[] };
   before?: { shadowRoots: number; hasMain: boolean; elements: number };
   generatedRatio?: number | null; noiseLines?: number; styleDrift?: string[];
 };
@@ -25,7 +26,7 @@ const klass = (f: string) => f
 
 const lines: string[] = [];
 lines.push(`# robo-vision dry run\n`);
-lines.push(`${results.length} sites. Machine copy found (served) on ${results.filter((r) => r.pane?.status?.[1] === "served to agents").length}; in-page on ${results.filter((r) => r.pane?.step === "in-page").length}; generated on ${results.filter((r) => r.pane?.step === "generated").length}; no copy on ${results.filter((r) => !r.pane?.step).length}.\n`);
+lines.push(`${results.length} sites. Machine copy found (served) on ${results.filter((r) => r.pane?.served ?? r.pane?.status?.[1] === "served to agents").length}; in-page on ${results.filter((r) => r.pane?.step === "in-page").length}; generated on ${results.filter((r) => r.pane?.step === "generated").length}; no copy on ${results.filter((r) => !r.pane?.step).length}.\n`);
 
 const counts = new Map<string, string[]>();
 for (const r of results) for (const f of r.findings) counts.set(klass(f), [...(counts.get(klass(f)) ?? []), host(r.url)]);
