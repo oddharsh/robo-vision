@@ -58,8 +58,10 @@ export interface Rerouted {
 export interface RerouteResult {
   rerouted: Rerouted | null;
   suggestions: Suggestion[];
-  /** which lists were read, and how many pages each gave */
-  sources: { source: PageSource | "seen"; pages: number }[];
+  /** which lists were read, and how many pages each gave. `failed` means a
+   *  read did not arrive (a network error, a 5xx, a 429): what did arrive was
+   *  used, nothing was remembered, and the next 404 asks again */
+  sources: { source: PageSource | "seen"; pages: number; failed?: true }[];
 }
 
 // ---- reading the page list --------------------------------------------------
@@ -89,11 +91,18 @@ export function parseSitemap(xml: string): { index: boolean; locs: string[] } {
   return { index: /<sitemapindex\b/.test(xml), locs: [...xml.matchAll(LOC)].map((m) => decode(m[1])) };
 }
 
-async function readCapped(f: typeof fetch, url: string, maxBytes: number, accept: string): Promise<{ ok: boolean; type: string; text: string }> {
+// A read either answered (200, or a 404 that says there is no such list) or
+// failed to arrive. Only an answer is worth remembering: a 503 or a dropped
+// connection says nothing about the site, and remembering it as "no pages"
+// cost every later 404 on that origin its suggestions for the memory's hour.
+type Read = { ok: boolean; failed: boolean; type: string; text: string };
+const failedStatus = (s: number) => s >= 500 || s === 429 || s === 408;
+
+async function readCapped(f: typeof fetch, url: string, maxBytes: number, accept: string): Promise<Read> {
   try {
     const res = await f(url, { headers: { accept }, redirect: "follow" });
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (!res.ok || !res.body) { void res.body?.cancel(); return { ok: false, type, text: "" }; }
+    if (!res.ok || !res.body) { void res.body?.cancel(); return { ok: false, failed: failedStatus(res.status), type, text: "" }; }
     // a sitemap can run to 9 MB (cdata.com): stop reading at the cap
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -108,24 +117,28 @@ async function readCapped(f: typeof fetch, url: string, maxBytes: number, accept
     const buf = new Uint8Array(n);
     let at = 0;
     for (const c of chunks) { buf.set(c.subarray(0, Math.min(c.length, n - at)), at); at += c.length; if (at >= n) break; }
-    return { ok: true, type, text: new TextDecoder().decode(buf) };
+    return { ok: true, failed: false, type, text: new TextDecoder().decode(buf) };
   } catch {
-    return { ok: false, type: "", text: "" };
+    return { ok: false, failed: true, type: "", text: "" };
   }
 }
 
 const looksHtml = (s: string) => /^\s*<(?:!doctype|html|head|body)\b/i.test(s.replace(/^﻿/, ""));
 
-async function readLlms(f: typeof fetch, origin: string, o: Required<Pick<RerouteOptions, "maxBytes">>): Promise<PageEntry[]> {
+type Listed = { entries: PageEntry[]; failed: boolean };
+
+async function readLlms(f: typeof fetch, origin: string, o: Required<Pick<RerouteOptions, "maxBytes">>): Promise<Listed> {
   const r = await readCapped(f, `${origin}/llms.txt`, o.maxBytes, "text/markdown, text/plain");
   // a single-page app answers /llms.txt with its shell and a 200
-  if (!r.ok || r.type === "text/html" || looksHtml(r.text)) return [];
-  return pagesFromLlmsTxt(r.text, origin);
+  if (!r.ok || r.type === "text/html" || looksHtml(r.text)) return { entries: [], failed: r.failed };
+  return { entries: pagesFromLlmsTxt(r.text, origin), failed: false };
 }
 
-async function readSitemaps(f: typeof fetch, origin: string, o: Required<Pick<RerouteOptions, "maxBytes" | "maxSitemaps">>, start?: string): Promise<PageEntry[]> {
+async function readSitemaps(f: typeof fetch, origin: string, o: Required<Pick<RerouteOptions, "maxBytes" | "maxSitemaps">>, start?: string): Promise<Listed> {
   // robots.txt names the sitemaps when they are not at the default address
   const robots = start ? null : await readCapped(f, `${origin}/robots.txt`, 256 * 1024, "text/plain");
+  // any read that failed to arrive makes the whole list partial
+  let failed = robots?.failed ?? false;
   const named = start ? [start] : robots?.ok ? [...robots.text.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => m[1]) : [];
   // unnamed, try the two defaults: /sitemap.xml (Next.js, most CMSs) and
   // /sitemap-index.xml (Astro's @astrojs/sitemap; docs.astro.build has only it)
@@ -141,6 +154,7 @@ async function readSitemaps(f: typeof fetch, origin: string, o: Required<Pick<Re
     // compressed sitemaps (.xml.gz) would need a decompressor in every runtime
     if (/\.gz$/i.test(new URL(url, origin).pathname)) continue;
     const r = await readCapped(f, new URL(url, origin).href, budget, "application/xml, text/xml");
+    failed ||= r.failed;
     if (!r.ok) continue;
     budget -= r.text.length;
     const { index, locs } = parseSitemap(r.text);
@@ -153,9 +167,10 @@ async function readSitemaps(f: typeof fetch, origin: string, o: Required<Pick<Re
     }
   }
   if (fallback && !pages.size && seen.size < o.maxSitemaps) {
-    return readSitemaps(f, origin, { ...o, maxSitemaps: o.maxSitemaps - seen.size }, fallback);
+    const next = await readSitemaps(f, origin, { ...o, maxSitemaps: o.maxSitemaps - seen.size }, fallback);
+    return { entries: next.entries, failed: failed || next.failed };
   }
-  return [...pages].map((url) => ({ url }));
+  return { entries: [...pages].map((url) => ({ url })), failed };
 }
 
 /** the origin's page list from each source in turn, remembered per origin */
@@ -172,11 +187,12 @@ export async function pageList(origin: string, opts: RerouteOptions & { fetch?: 
   };
   for (const source of opts.pages ?? ["llms"]) {
     let entries = opts.memory?.pages(origin, source) ?? null;
+    let failed = false;
     if (!entries) {
-      entries = source === "llms" ? await readLlms(f, origin, o) : await readSitemaps(f, origin, o);
-      opts.memory?.setPages(origin, source, entries);
+      ({ entries, failed } = source === "llms" ? await readLlms(f, origin, o) : await readSitemaps(f, origin, o));
+      if (!failed) opts.memory?.setPages(origin, source, entries);
     }
-    sources.push({ source, pages: entries.length });
+    sources.push({ source, pages: entries.length, ...(failed && { failed: true as const }) });
     add(entries);
   }
   // links in copies already read on this origin cost nothing more
