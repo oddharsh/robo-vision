@@ -8,12 +8,12 @@ export {
 export { factsFromHtml } from "./facts-html.ts";
 export { checkPage, type CheckOptions, type Finding, type Report, type Severity } from "./check.ts";
 
-export { originMemory, mapStore, type OriginMemory, type Store, type PageEntry, type MemoryOptions } from "./memory.ts";
+export { originMemory, mapStore, resolveRemembered, type OriginMemory, type Store, type PageEntry, type MemoryOptions } from "./memory.ts";
 export { reroute, pageList, spellingChooser, exactFix, pagesFromLlmsTxt, parseSitemap, type Chooser, type Suggestion, type Rerouted, type RerouteOptions, type RerouteResult, type PageSource } from "./reroute.ts";
 
-import { resolveMachineCopy, type Attempt, type MachineCopy, type ResolveOptions, type Step } from "./source.ts";
+import type { Attempt, MachineCopy, ResolveOptions } from "./source.ts";
 import { factsFromHtml } from "./facts-html.ts";
-import { originMemory, type OriginMemory } from "./memory.ts";
+import { originMemory, resolveRemembered, type OriginMemory } from "./memory.ts";
 import { reroute as findPage, linksIn, type RerouteOptions, type Rerouted, type Suggestion } from "./reroute.ts";
 
 export interface Fetched {
@@ -75,14 +75,9 @@ export async function fetchMachineCopy(url: string, opts: FetchOptions = {}): Pr
   if (!res.ok) return { ...base, copy: null, attempts: [] };
 
   // an in-page region is shown to visitors, never served; an agent skips it.
-  // A section that served nothing before is not asked again; a declared
-  // alternate is always read, since a declaration costs no guess
-  const quiet = memory?.servesNothing(page) ?? false;
-  const order: Step[] = ["link-alternate", ...(quiet ? [] : memory?.order(page) ?? ["negotiated", "md-suffix"] as const)];
+  // A declared alternate is always read, since a declaration costs no guess
   try {
-    const copy = await resolveMachineCopy(page, { ...opts, fetch: f, facts: factsFromHtml(html), order });
-    memory?.learn(page, copy);
-    if (!quiet) memory?.noteNothing(page, false);
+    const copy = await resolveRemembered(page, memory, { ...opts, fetch: f, facts: factsFromHtml(html), order: ["link-alternate", "negotiated", "md-suffix"] });
     // the links in a copy are pages this origin has, for a later 404
     if (memory) {
       const origin = new URL(page).origin;
@@ -93,7 +88,6 @@ export async function fetchMachineCopy(url: string, opts: FetchOptions = {}): Pr
     }
     return { ...base, copy, attempts: copy.attempts };
   } catch (e) {
-    if (!quiet) memory?.noteNothing(page, true);
     return { ...base, copy: null, attempts: (e as { attempts?: Attempt[] }).attempts ?? [] };
   }
 }

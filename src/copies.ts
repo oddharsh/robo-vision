@@ -22,7 +22,7 @@
 
 import { resolveMachineCopy, strippedPage, type MachineCopy } from "./source.ts";
 import { factsFromDocument } from "./facts-dom.ts";
-import { originMemory } from "./memory.ts";
+import { originMemory, resolveRemembered } from "./memory.ts";
 import { generateMarkdown } from "./generate.ts";
 import { keyOf as pageKey, isMarkdownUrl } from "./params.ts";
 
@@ -36,24 +36,15 @@ const memory = originMemory(
   { get: (k) => sessionStorage.getItem(k), set: (k, v) => (v === null ? sessionStorage.removeItem(k) : sessionStorage.setItem(k, v)) },
   { ttl: Infinity },
 );
-const notAsked = (url: string) => `not asked: /${new URL(url).pathname.split("/")[1] ?? ""} served no Markdown earlier this session`;
 
 /** the document the browser loaded; cached for the life of the page */
 export function copyForThisPage(page: string, opts: { exclude?: string[] } = {}): Promise<MachineCopy> {
   const key = pageKey(page);
   const hit = cache.get(key);
   if (hit) return hit as Promise<MachineCopy>;
-  const guessless = memory.servesNothing(key);
-  const p = resolveMachineCopy(key, {
+  const p = resolveRemembered(key, memory, {
     facts: factsFromDocument(document),
     generate: () => generateMarkdown(document, { exclude: opts.exclude }),
-    skip: guessless ? [{ step: "negotiated", reason: notAsked(key) }, "md-suffix"] : [],
-  }).then((c) => {
-    memory.learn(key, c);
-    // only a page that was actually asked can prove the section serves nothing
-    if (!guessless) memory.noteNothing(key, c.step === "generated");
-    if (c.served) memory.noteNothing(key, false);
-    return c;
   });
   cache.set(key, p);
   return p;
@@ -77,18 +68,10 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
     p.then((c) => { if (!c) cache.delete(key); });
     return p;
   }
-  const p = (async () => {
-    // known empty: skip the requests; the caller loads the page for real and
-    // that page generates without asking either
-    if (memory.servesNothing(key)) return null;
-    try {
-      const c = await resolveMachineCopy(key, { order: memory.order(key) });
-      memory.learn(key, c);
-      return c;
-    } catch { /* neither door had one */ }
-    memory.noteNothing(key, true);
-    return null;
-  })();
+  // only the doors a request can answer; in a quiet section neither is
+  // asked, and null sends the caller to load the page for real, where it
+  // generates without asking either
+  const p = resolveRemembered(key, memory, { order: ["negotiated", "md-suffix"] }).catch(() => null);
   cache.set(key, p);
   // a miss is not remembered past this page: the next load may serve it
   p.then((c) => { if (!c) cache.delete(key); });
