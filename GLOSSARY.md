@@ -12,7 +12,8 @@ or it is generated; only a served copy says what agents read.
 **Twin**: a served copy at its own URL (`/x.md` for `/x`), declared or not.
 
 **Door**: one way a page's copy can be found: in-page, link-alternate,
-negotiated, md-suffix, generated. The resolver walks them in that order.
+negotiated, md-suffix, generated. The resolver walks them in that order. A URL
+that is itself a `.md` file has one door, md-url: the file.
 _Avoid_: step (the code's type is `Step`; prose says door).
 
 **Machine region**: an author-written block on the page for machine view

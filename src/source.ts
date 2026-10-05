@@ -13,15 +13,20 @@
 //   md-suffix       the llms.txt convention: /foo -> /foo.md, / -> /index.html.md.
 //   generated       nothing exists, so walk the DOM we already have.
 //
+// A URL that is itself a .md file is the one exception: it is answered by
+// the file alone, the md-url door. Every other door would repeat it (asking
+// the same URL again), or has nothing to work with (no page, so no facts and
+// no suffix).
+//
 // Every step that fetches is judged on the RESPONSE rather than the status
 // code, because the two failures that matter both answer 200: a URL-keyed
 // cache handing back the HTML it stored for the page, and a SPA fallback
 // answering /anything.md with the app shell. Neither is a twin, and treating
 // either as one would show a human "what the machine sees" as a page of markup.
 
-import { BUST_PARAM } from "./params.ts";
+import { BUST_PARAM, isMarkdownUrl } from "./params.ts";
 
-export type Step = "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated" | "md-link";
+export type Step = "md-url" | "in-page" | "link-alternate" | "negotiated" | "md-suffix" | "generated";
 
 /** what a fetched response turned out to be. A code, because check.ts decides
  *  on it; `reason` beside it is a sentence for people and free to be reworded */
@@ -222,7 +227,12 @@ async function* walk(pageUrl: string, opts: ResolveOptions): AsyncGenerator<Door
 
   const facts = opts.facts;
 
-  const open: Record<Exclude<Step, "md-link">, (attempts: Attempt[]) => Promise<MachineCopy | null>> = {
+  const open: Record<Step, (attempts: Attempt[]) => Promise<MachineCopy | null>> = {
+    "md-url": async (attempts) => {
+      const { copy } = await tryFetch(attempts, "md-url", pageUrl, md("text/markdown, text/plain;q=0.5"));
+      return copy;
+    },
+
     "in-page": async (attempts) => {
       if (facts?.inPage?.trim()) return { step: "in-page", served: false, url: null, contentType: null, text: facts.inPage, attempts };
       attempts.push({ step: "in-page", url: null, hit: false, reason: facts ? "no machine region" : "no page facts" });
@@ -285,8 +295,9 @@ async function* walk(pageUrl: string, opts: ResolveOptions): AsyncGenerator<Door
     },
   };
 
-  for (const step of opts.order ?? ORDER) {
-    if (step === "md-link") continue;
+  // a .md URL is answered by the file alone, whatever order was asked for
+  const doors = isMarkdownUrl(pageUrl) ? (["md-url"] as Step[]) : (opts.order ?? ORDER).filter((s) => s !== "md-url");
+  for (const step of doors) {
     const attempts: Attempt[] = [];
     if (why.has(step)) {
       const reason = why.get(step);

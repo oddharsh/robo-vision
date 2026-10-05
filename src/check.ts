@@ -11,6 +11,7 @@
 
 import { surveyMachineCopies, type Attempt, type Door, type MachineCopy, type ResolveOptions } from "./source.ts";
 import { factsFromHtml } from "./facts-html.ts";
+import { isMarkdownUrl } from "./params.ts";
 
 export type Severity = "error" | "warn" | "info";
 
@@ -23,7 +24,10 @@ export interface Finding {
 
 export interface Report {
   url: string;
-  /** the first response an HTML fetcher gets */
+  /** a page, audited through every door; or a .md URL, audited as the file
+   *  it is, with the page rules (declarations, Vary, in-page drift) left out */
+  kind: "page" | "file";
+  /** the first response a fetcher gets: the HTML for a page, the file itself */
   page: { status: number | null; contentType: string | null; chars: number };
   doors: Door[];
   /** the copy an agent is served, by the first door that serves one */
@@ -53,7 +57,17 @@ export async function checkPage(url: string, opts: CheckOptions = {}): Promise<R
   let page: Report["page"] = { status: null, contentType: null, chars: 0 };
   let finalUrl = url;
   let reached = false;
-  try {
+  const kind: Report["kind"] = isMarkdownUrl(url) ? "file" : "page";
+  let doors: Door[] = [];
+  if (kind === "file") {
+    // one request, to the file itself; there is no page to read facts from
+    doors = await surveyMachineCopies(url, { fetch: f, headers: opts.headers });
+    const a = doors[0]?.attempts[0];
+    page = { status: a?.status ?? null, contentType: a?.contentType ?? null, chars: doors[0]?.copy?.text.length ?? 0 };
+    reached = a?.status !== undefined && a.status < 400;
+    if (a?.verdict === "fetch-failed") add("error", "page-unreachable", `the file could not be fetched: ${a.reason}`, url);
+    else if (!reached) add("error", "page-unreachable", `the file answered HTTP ${a?.status}`, url);
+  } else try {
     const res = await f(url, { headers: { ...opts.headers, accept: "text/html" }, redirect: "follow" });
     html = await res.text();
     finalUrl = res.url || url;
@@ -67,13 +81,15 @@ export async function checkPage(url: string, opts: CheckOptions = {}): Promise<R
   }
 
   const facts = factsFromHtml(html, opts.machineRegion);
-  const doors = !reached ? [] : await surveyMachineCopies(finalUrl, { fetch: f, headers: opts.headers, cacheBust: opts.cacheBust, facts });
+  if (kind === "page" && reached) doors = await surveyMachineCopies(finalUrl, { fetch: f, headers: opts.headers, cacheBust: opts.cacheBust, facts });
   const door = (step: string) => doors.find((d) => d.step === step);
   const servedDoors = doors.filter((d) => d.copy?.served);
   const served = servedDoors[0]?.copy ?? null;
 
   if (reached && !served) {
-    add("error", "nothing-served", "no door serves Markdown: an agent that fetches this page gets its HTML", finalUrl);
+    add("error", "nothing-served", kind === "file"
+      ? "the .md URL does not answer with Markdown"
+      : "no door serves Markdown: an agent that fetches this page gets its HTML", finalUrl);
   }
 
   for (const d of doors) for (const a of d.attempts) {
@@ -102,7 +118,8 @@ export async function checkPage(url: string, opts: CheckOptions = {}): Promise<R
     if (a.status === 200 && isHtml(a)) add("info", "md-suffix-answers-html", "the .md spelling answers 200 with HTML (a catch-all route); a fetcher that trusts the status reads the app shell", a.url);
   }
 
-  if (served && !facts.alternates.length) {
+  // a file cannot declare itself
+  if (kind === "page" && served && !facts.alternates.length) {
     add("warn", "undeclared", `Markdown is served by ${served.step} but the page declares no <link rel="alternate" type="text/markdown">; a fetcher has to guess it is there`, served.url);
   }
 
@@ -120,5 +137,5 @@ export async function checkPage(url: string, opts: CheckOptions = {}): Promise<R
     else if (squash(facts.inPage) !== squash(served.text)) add("warn", "in-page-drift", `the page's machine region (${facts.inPage.length} chars) differs from the copy agents are served (${served.text.length} chars)`, served.url);
   }
 
-  return { url: finalUrl, page, doors, served, findings, ok: !findings.some((x) => x.severity === "error") };
+  return { url: finalUrl, kind, page, doors, served, findings, ok: !findings.some((x) => x.severity === "error") };
 }

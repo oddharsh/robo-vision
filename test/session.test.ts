@@ -37,7 +37,7 @@ function browser(start: string, fake: Fake = {}) {
   return { session, calls, shown, last, back, mode: () => mode, address: () => path(address) };
 }
 
-const TWINS = { "/b": copy("B twin"), "/d": copy("D twin"), "/m/mirror.md": copy("mirror", "md-link"), "/m/only.md": copy("only", "md-link") };
+const TWINS = { "/b": copy("B twin"), "/d": copy("D twin"), "/m/mirror.md": copy("mirror", "md-url"), "/m/only.md": copy("only", "md-url") };
 
 test("Machine resolves the document's copy before the mode flips", async () => {
   const b = browser("/a");

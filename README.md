@@ -223,7 +223,8 @@ toggle doesn't show that Markdown.
 
 ## Resolution order
 
-in-page, link-alternate, negotiated, md-suffix, generated. A fetched step hits
+in-page, link-alternate, negotiated, md-suffix, generated. A URL that is itself a `.md` file is
+answered by the file alone (`md-url`), in one request. A fetched step hits
 on the response BODY and TYPE, never the status: both traps answer 200 (a
 URL-keyed cache returning the page's HTML, a SPA shell answering `/x.md`).
 

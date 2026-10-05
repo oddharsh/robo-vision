@@ -52,7 +52,7 @@ test("a .md link is read as itself and leaves the origin's memory alone", async 
   routes = { "/m/x.md": { type: "text/markdown", body: "# X" }, "/d": PAGE, "/d.md": { type: "text/markdown", body: "# D" } };
   const c = await fresh();
   const x = await c.copyFor(`${O}/m/x.md`);
-  expect(x!.step).toBe("md-link");
+  expect(x!.step).toBe("md-url");
   log.length = 0;
   await c.copyFor(`${O}/d`);
   expect(log).toEqual(["fetch /d", "fetch /d.md"]); // negotiated first: nothing was learned

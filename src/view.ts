@@ -22,7 +22,7 @@ const STEP_LABEL: Record<Step, string> = {
   "negotiated": "same URL, Accept: text/markdown",
   "md-suffix": ".md next to the page",
   "generated": "generated here from the live page",
-  "md-link": "a .md file, linked from the last copy",
+  "md-url": "a Markdown file, read as itself",
 };
 
 export interface RenderOptions {

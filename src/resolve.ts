@@ -11,7 +11,8 @@ export { checkPage, type CheckOptions, type Finding, type Report, type Severity 
 export { originMemory, mapStore, resolveRemembered, type OriginMemory, type Store, type PageEntry, type MemoryOptions } from "./memory.ts";
 export { reroute, pageList, spellingChooser, exactFix, pagesFromLlmsTxt, parseSitemap, type Chooser, type Suggestion, type Rerouted, type RerouteOptions, type RerouteResult, type PageSource } from "./reroute.ts";
 
-import type { Attempt, MachineCopy, ResolveOptions } from "./source.ts";
+import { resolveMachineCopy, type Attempt, type MachineCopy, type ResolveOptions } from "./source.ts";
+import { isMarkdownUrl } from "./params.ts";
 import { factsFromHtml } from "./facts-html.ts";
 import { originMemory, resolveRemembered, type OriginMemory } from "./memory.ts";
 import { reroute as findPage, linksIn, type RerouteOptions, type Rerouted, type Suggestion } from "./reroute.ts";
@@ -59,19 +60,48 @@ const shared = originMemory();
 export async function fetchMachineCopy(url: string, opts: FetchOptions = {}): Promise<Fetched> {
   const f = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const memory = opts.memory === undefined ? shared : opts.memory;
-  const res = await f(url, { headers: { ...opts.headers, accept: "text/html" }, redirect: "follow" });
-  const html = await res.text();
-  const page = res.url || url;
-  const base = { html, url: page, status: res.status };
 
-  if (res.status === 404 && opts.reroute !== false) {
+  // a 404, for a page or a file alike: an exact fix is followed, anything
+  // fuzzier is suggested
+  const notFound = async (page: string, base: Omit<Fetched, "copy" | "attempts">): Promise<Fetched> => {
     const r = await findPage(page, { ...opts.reroute, fetch: f, memory: memory ?? undefined });
     if (r.rerouted) {
       const next = await fetchMachineCopy(r.rerouted.to, { ...opts, reroute: false });
       return { ...next, rerouted: { ...r.rerouted, from: url } };
     }
     return { ...base, copy: null, attempts: [], suggestions: r.suggestions };
+  };
+
+  if (isMarkdownUrl(url)) {
+    // the URL is the file: one request, answered by the md-url door. The tap
+    // keeps that response, so its status drives the 404 handling and its body
+    // is the fallback when it turns out not to be Markdown
+    let seen: Response | null = null;
+    const tap = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const r = await f(input, init);
+      seen = r.clone();
+      return r;
+    }) as typeof fetch;
+    let copy: MachineCopy | null = null;
+    let attempts: Attempt[] = [];
+    try {
+      copy = await resolveMachineCopy(url, { ...opts, fetch: tap });
+      attempts = copy.attempts;
+    } catch (e) {
+      attempts = (e as { attempts?: Attempt[] }).attempts ?? [];
+    }
+    const res = seen as Response | null;
+    const base = { html: copy || !res ? "" : await res.text(), url: res?.url || url, status: res?.status ?? 0 };
+    if (base.status === 404 && opts.reroute !== false) return notFound(base.url, base);
+    return { ...base, copy, attempts };
   }
+
+  const res = await f(url, { headers: { ...opts.headers, accept: "text/html" }, redirect: "follow" });
+  const html = await res.text();
+  const page = res.url || url;
+  const base = { html, url: page, status: res.status };
+
+  if (res.status === 404 && opts.reroute !== false) return notFound(page, base);
   if (!res.ok) return { ...base, copy: null, attempts: [] };
 
   // an in-page region is shown to visitors, never served; an agent skips it.

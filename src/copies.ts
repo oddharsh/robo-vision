@@ -64,9 +64,7 @@ export function copyFor(url: string): Promise<MachineCopy | null> {
     // pages this way): read it as the Markdown it says it is, outside the
     // per-origin strategy memory, since it says nothing about how the site
     // serves copies for its ordinary page URLs
-    const p = resolveMachineCopy(key, { facts: { alternates: [key], inPage: null }, order: ["link-alternate"] })
-      .then((c): MachineCopy => ({ ...c, step: "md-link", attempts: c.attempts.filter((a) => a.url).map((a) => ({ ...a, step: "md-link" })) }))
-      .catch(() => null);
+    const p = resolveMachineCopy(key).catch(() => null);
     cache.set(key, p);
     p.then((c) => { if (!c) cache.delete(key); });
     return p;
