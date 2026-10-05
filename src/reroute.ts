@@ -19,7 +19,7 @@
 // rank them and cannot invent one. The spelling chooser here needs nothing;
 // a decision model (Clef, as ry uses, or any classifier) is the second adapter.
 
-import { strippedPage } from "./source.ts";
+import { strippedPage, mediaType, looksLikeHtml } from "./source.ts";
 import type { OriginMemory, PageEntry } from "./memory.ts";
 
 /** where an origin's page list is read from, in the order given */
@@ -101,7 +101,7 @@ const failedStatus = (s: number) => s >= 500 || s === 429 || s === 408;
 async function readCapped(f: typeof fetch, url: string, maxBytes: number, accept: string): Promise<Read> {
   try {
     const res = await f(url, { headers: { accept }, redirect: "follow" });
-    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    const type = mediaType(res.headers.get("content-type"));
     if (!res.ok || !res.body) { void res.body?.cancel(); return { ok: false, failed: failedStatus(res.status), type, text: "" }; }
     // a sitemap can run to 9 MB (cdata.com): stop reading at the cap
     const reader = res.body.getReader();
@@ -123,14 +123,13 @@ async function readCapped(f: typeof fetch, url: string, maxBytes: number, accept
   }
 }
 
-const looksHtml = (s: string) => /^\s*<(?:!doctype|html|head|body)\b/i.test(s.replace(/^﻿/, ""));
 
 type Listed = { entries: PageEntry[]; failed: boolean };
 
 async function readLlms(f: typeof fetch, origin: string, o: Required<Pick<RerouteOptions, "maxBytes">>): Promise<Listed> {
   const r = await readCapped(f, `${origin}/llms.txt`, o.maxBytes, "text/markdown, text/plain");
   // a single-page app answers /llms.txt with its shell and a 200
-  if (!r.ok || r.type === "text/html" || looksHtml(r.text)) return { entries: [], failed: r.failed };
+  if (!r.ok || r.type === "text/html" || looksLikeHtml(r.text)) return { entries: [], failed: r.failed };
   return { entries: pagesFromLlmsTxt(r.text, origin), failed: false };
 }
 

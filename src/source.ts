@@ -93,26 +93,40 @@ const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown"]);
  * `text/markdown; charset=utf-8` counts wherever `text/markdown` does.
  */
 export function isMarkdownType(type: string | null | undefined): boolean {
-  return MARKDOWN_TYPES.has((type ?? "").split(";")[0].trim().toLowerCase());
+  return MARKDOWN_TYPES.has(mediaType(type));
+}
+
+/** a Content-Type header or type attribute as its bare media type */
+export function mediaType(header: string | null | undefined): string {
+  return (header ?? "").split(";")[0].trim().toLowerCase();
+}
+
+/**
+ * Whether a body is an HTML document, whatever it was labelled. Skips a BOM
+ * and any leading comments first: Shopify storefronts answer Accept:
+ * text/markdown with `text/markdown` over the full HTML page, and a theme that
+ * opens with <!-- BRAND --> put 664 KB of markup past a sniff that only looked
+ * at the first tag (allbirds.com, 2026-09-23). Then only the four tags that
+ * open a whole document count: Markdown may begin with inline HTML (a README's
+ * centred <div>), and that is still a copy.
+ */
+export function looksLikeHtml(body: string): boolean {
+  const lead = body.slice(0, 4096).replace(/^\uFEFF/, "").replace(/^(?:\s*<!--[\s\S]*?-->)*\s*/, "");
+  return /^<(?:!doctype|html|head|body)\b/i.test(lead);
 }
 
 /** Judge a response as a Markdown twin: null on a hit, or what it is instead. */
 export function judge(res: Response, body: string, url: string): { verdict: Exclude<Verdict, "markdown" | "fetch-failed">; reason: string } | null {
   if (!res.ok) return { verdict: "http-error", reason: `HTTP ${res.status}` };
-  const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  const type = mediaType(res.headers.get("content-type"));
   const isMdPath = /\.md(?:$|[?#])/.test(new URL(url).pathname + new URL(url).search);
   // text/plain is how a plain static host serves a .md file it has no type for,
   // so it counts only where the URL itself says Markdown
   if (!isMarkdownType(type) && !(type === "text/plain" && isMdPath)) {
     return { verdict: "not-markdown", reason: type ? `answered ${type}` : "no content-type" };
   }
-  // a typed-right response can still be a document: sniff before believing it.
-  // Skip a BOM and any leading comments first: Shopify storefronts answer
-  // Accept: text/markdown with `text/markdown` over the full HTML page, and a
-  // theme that opens with <!-- BRAND --> put 664 KB of markup past a sniff
-  // that only looked at the first tag (allbirds.com, 2026-09-23)
-  const lead = body.slice(0, 4096).replace(/^\uFEFF/, "").replace(/^(?:\s*<!--[\s\S]*?-->)*\s*/, "");
-  if (/^<(?:!doctype|html|head|body)\b/i.test(lead)) return { verdict: "html-body", reason: "labelled Markdown, body is HTML" };
+  // a typed-right response can still be a document: sniff before believing it
+  if (looksLikeHtml(body)) return { verdict: "html-body", reason: "labelled Markdown, body is HTML" };
   if (!body.trim()) return { verdict: "empty-body", reason: "empty body" };
   return null;
 }

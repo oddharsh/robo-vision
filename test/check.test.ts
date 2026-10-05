@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { surveyMachineCopies, resolveMachineCopy, isMarkdownType } from "../src/source.ts";
+import { surveyMachineCopies, resolveMachineCopy, isMarkdownType, looksLikeHtml, mediaType } from "../src/source.ts";
 import { factsFromHtml } from "../src/facts-html.ts";
 import { checkPage } from "../src/check.ts";
 import { fetchMachineCopy } from "../src/resolve.ts";
@@ -33,6 +33,16 @@ const rules = (r: { findings: { rule: string }[] }) => r.findings.map((x) => x.r
 test("alternates are read whatever the attribute order or quoting", () => {
   const f = factsFromHtml(`<link href='/a.md' type="text/markdown" rel="alternate"><link rel=alternate type=text/x-markdown href=/b.md><link rel="alternate" type="application/rss+xml" href="/feed"><link rel="stylesheet" href="/x.css">`);
   expect(f.alternates).toEqual(["/a.md", "/b.md"]);
+});
+
+test("one sniff: a document's opening tags after a BOM and comments, and nothing else", () => {
+  expect(looksLikeHtml("\uFEFF<!-- a --> <!-- b -->\n<!DOCTYPE html>")).toBe(true);
+  expect(looksLikeHtml("  <html lang=en>")).toBe(true);
+  // Markdown may open with inline HTML; only a whole document is a page
+  expect(looksLikeHtml('<div align="center"><img src="logo.png"></div>\n\n# Title')).toBe(false);
+  expect(looksLikeHtml("<!-- generated -->\n# Title")).toBe(false);
+  expect(mediaType("Text/Markdown; charset=utf-8")).toBe("text/markdown");
+  expect(mediaType(null)).toBe("");
 });
 
 test("a declared type with parameters is still Markdown, as a response's would be", () => {

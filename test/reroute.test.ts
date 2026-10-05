@@ -81,6 +81,14 @@ test("an app shell at /llms.txt is no list", async () => {
   expect(r).toEqual({ rerouted: null, suggestions: [], sources: [{ source: "llms", pages: 0 }] });
 });
 
+test("an app shell that opens with a comment is no list, whatever its type says", async () => {
+  // typed text/plain, so only the sniff can tell; the comment hid it from the
+  // old one, and the shell's own Markdown-looking text was read as pages
+  const shell = "<!-- build 4f2a -->\n<!doctype html><html><body><p>See [docs](/docs).</p></body></html>";
+  const r = await reroute(`${O}/pricng`, { fetch: site({ "/llms.txt": { type: "text/plain", body: shell } }).f });
+  expect(r.sources).toEqual([{ source: "llms", pages: 0 }]);
+});
+
 test("the sitemap is read only when asked for, through robots.txt and an index", async () => {
   const routes = {
     "/robots.txt": { type: "text/plain", body: `User-agent: *\nSitemap: ${O}/sm-index.xml\n` },

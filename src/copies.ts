@@ -20,7 +20,7 @@
 // sessionStorage so it lasts the tab's session and no longer. A declared
 // alternate is always read, since a declaration is evidence and costs no guess.
 
-import { resolveMachineCopy, strippedPage, type MachineCopy } from "./source.ts";
+import { resolveMachineCopy, strippedPage, mediaType, type MachineCopy } from "./source.ts";
 import { factsFromDocument } from "./facts-dom.ts";
 import { originMemory, resolveRemembered } from "./memory.ts";
 import { generateMarkdown } from "./generate.ts";
@@ -107,8 +107,7 @@ export function humanPageFor(mdUrl: string): Promise<string | null> {
     try {
       let r = await ask("HEAD");
       if (r.status === 405 || r.status === 501) r = await ask("GET"); // a server that refuses HEAD
-      const type = (r.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-      if (!r.ok || type !== "text/html") return null;
+      if (!r.ok || mediaType(r.headers.get("content-type")) !== "text/html") return null;
       const final = new URL(r.url || candidate);
       return final.origin === new URL(candidate).origin ? pageKey(final.href) : null;
     } catch {
