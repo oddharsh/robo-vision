@@ -66,3 +66,21 @@ test("the page behind a .md: HTML at the stripped URL, nothing for a 404, GET wh
   expect(await c.humanPageFor(`${O}/m/picky.md`)).toBe(`${O}/m/picky`);
   expect(log).toEqual(["head /m/mirror", "head /m/only", "head /m/picky", "fetch /m/picky"]);
 });
+
+test("a lookup on the loaded page that failed is tried again, not served from cache", async () => {
+  // a document with no body: generation throws, as it would on a page torn
+  // down mid-read. Every door before it misses, so the lookup rejects
+  const doc = { querySelectorAll: () => [], querySelector: () => null, title: "", baseURI: `${O}/p`, defaultView: null, body: undefined };
+  Object.assign(globalThis, { document: doc });
+  try {
+    const c = await fresh();
+    await expect(c.copyForThisPage(`${O}/p`)).rejects.toThrow();
+    const asked = log.length;
+    expect(asked).toBeGreaterThan(0);
+    log.length = 0;
+    await expect(c.copyForThisPage(`${O}/p`)).rejects.toThrow();
+    expect(log.length).toBe(asked); // asked again, the same doors
+  } finally {
+    delete (globalThis as { document?: unknown }).document;
+  }
+});
