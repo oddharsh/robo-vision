@@ -23,7 +23,6 @@ src/cli.ts          robo-vision check <url>
 scripts/build.ts    dist/robo-vision.js (+ chunks/) lazy, dist/robo-vision.eager.js single file,
                     dist/resolve.js and dist/cli.js for Node
 demo/serve.ts       six server behaviours, one page       bun demo/serve.ts 8841
-probe.ts            the resolver against live sites      bun probe.ts <url>...
 dryrun/             drop robo-vision into 34 live sites in real Chrome
 test/               bun test (the generator tests drive real Chrome)
 ```
@@ -205,9 +204,8 @@ No runtime dependencies, just bun (TypeScript is there to emit declarations).
 ```
 bun test
 bun run build                     # dist/, everything the npm package ships
-bun run check https://parallel.ai/
+bun run check https://parallel.ai/ https://www.cloudflare.com/connect/ https://konghq.com/
 bun run demo                      # http://localhost:8841
-bun run probe https://parallel.ai/ https://www.cloudflare.com/connect/ https://konghq.com/
 ```
 
 ## What the three sites built (probed 2026-09-23)

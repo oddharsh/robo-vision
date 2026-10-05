@@ -56,6 +56,8 @@ function print(r: Report) {
   console.log(!r.served ? "  => agents are served HTML"
     : flaky ? `  => agents are served HTML or ${r.served.text.length.toLocaleString("en")} chars of Markdown, whichever the cache holds`
     : `  => agents are served ${r.served.text.length.toLocaleString("en")} chars of Markdown by ${r.served.step}`);
+  // no rule can say whether the Markdown is about the page; a glance can
+  if (r.served) console.log(`     starts ${JSON.stringify(r.served.text.trim().replace(/\s+/g, " ").slice(0, 70))}`);
   for (const f of r.findings) console.log(`  ${MARK[f.severity]} ${f.rule}: ${f.message}${f.url ? `\n        ${f.url}` : ""}`);
 }
 
