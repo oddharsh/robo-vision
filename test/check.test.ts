@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { surveyMachineCopies, resolveMachineCopy } from "../src/source.ts";
+import { surveyMachineCopies, resolveMachineCopy, isMarkdownType } from "../src/source.ts";
 import { factsFromHtml } from "../src/facts-html.ts";
 import { checkPage } from "../src/check.ts";
 import { fetchMachineCopy } from "../src/resolve.ts";
@@ -33,6 +33,14 @@ const rules = (r: { findings: { rule: string }[] }) => r.findings.map((x) => x.r
 test("alternates are read whatever the attribute order or quoting", () => {
   const f = factsFromHtml(`<link href='/a.md' type="text/markdown" rel="alternate"><link rel=alternate type=text/x-markdown href=/b.md><link rel="alternate" type="application/rss+xml" href="/feed"><link rel="stylesheet" href="/x.css">`);
   expect(f.alternates).toEqual(["/a.md", "/b.md"]);
+});
+
+test("a declared type with parameters is still Markdown, as a response's would be", () => {
+  expect(factsFromHtml('<link rel="alternate" type="Text/Markdown; charset=utf-8" href="/a.md">').alternates).toEqual(["/a.md"]);
+  expect(isMarkdownType("text/markdown; charset=utf-8")).toBe(true);
+  expect(isMarkdownType(" TEXT/X-MARKDOWN ")).toBe(true);
+  expect(isMarkdownType("text/markdownish")).toBe(false);
+  expect(isMarkdownType(null)).toBe(false);
 });
 
 test("an href's entities are decoded", () => {

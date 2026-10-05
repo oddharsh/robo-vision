@@ -14,6 +14,7 @@
 import { chromium, type Page } from "playwright-core";
 import { mkdir } from "node:fs/promises";
 import { resolveMachineCopy } from "../src/source.ts";
+import { factsFromHtml } from "../src/facts-html.ts";
 
 export const SITES: { url: string; note: string }[] = [
   { url: "https://parallel.ai/", note: "the one everybody cites; Rauch amplified it 2026-01-29" },
@@ -175,7 +176,10 @@ async function survey(browser: Awaited<ReturnType<typeof chromium.launch>>, site
     }
     // what an agent gets at the same URL, with the page's own declarations
     try {
-      const c = await resolveMachineCopy(page.url(), { facts: { alternates: altLinks.filter((a) => /markdown/.test(a)).map((a) => a.split(" ")[1]), inPage: null }, skip: ["in-page", "generated"] });
+      // the declarations, read by the same rule the toggle uses; in-page is
+      // what the site shows people, so it is not asked here
+      const facts = { ...factsFromHtml(await page.content()), inPage: null };
+      const c = await resolveMachineCopy(page.url(), { facts, skip: ["in-page", "generated"] });
       r.agentsServed = { step: c.step, url: c.url, chars: c.text.length, head: c.text.slice(0, 160) };
     } catch (e) {
       r.agentsServed = { step: null, attempts: (e as { attempts?: { step: string; reason: string }[] }).attempts?.map((a) => `${a.step}: ${a.reason}`) };

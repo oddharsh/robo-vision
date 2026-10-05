@@ -87,6 +87,15 @@ export { BUST_PARAM };
 
 const MARKDOWN_TYPES = new Set(["text/markdown", "text/x-markdown"]);
 
+/**
+ * A media type that names Markdown, from a Content-Type header or a <link>'s
+ * type attribute alike: parameters dropped, case ignored, so
+ * `text/markdown; charset=utf-8` counts wherever `text/markdown` does.
+ */
+export function isMarkdownType(type: string | null | undefined): boolean {
+  return MARKDOWN_TYPES.has((type ?? "").split(";")[0].trim().toLowerCase());
+}
+
 /** Judge a response as a Markdown twin: null on a hit, or what it is instead. */
 export function judge(res: Response, body: string, url: string): { verdict: Exclude<Verdict, "markdown" | "fetch-failed">; reason: string } | null {
   if (!res.ok) return { verdict: "http-error", reason: `HTTP ${res.status}` };
@@ -94,7 +103,7 @@ export function judge(res: Response, body: string, url: string): { verdict: Excl
   const isMdPath = /\.md(?:$|[?#])/.test(new URL(url).pathname + new URL(url).search);
   // text/plain is how a plain static host serves a .md file it has no type for,
   // so it counts only where the URL itself says Markdown
-  if (!MARKDOWN_TYPES.has(type) && !(type === "text/plain" && isMdPath)) {
+  if (!isMarkdownType(type) && !(type === "text/plain" && isMdPath)) {
     return { verdict: "not-markdown", reason: type ? `answered ${type}` : "no content-type" };
   }
   // a typed-right response can still be a document: sniff before believing it.
@@ -296,14 +305,4 @@ export async function surveyMachineCopies(pageUrl: string, opts: ResolveOptions 
   const doors: Door[] = [];
   for await (const door of walk(pageUrl, opts)) doors.push(door);
   return doors;
-}
-
-/** read PageFacts off a live Document (browser side) */
-export function factsFromDocument(doc: Document, machineRegion = "[data-machine-only]"): PageFacts {
-  const alternates = [...doc.querySelectorAll<HTMLLinkElement>('link[rel~="alternate" i][type]')]
-    .filter((l) => MARKDOWN_TYPES.has(l.type.toLowerCase()))
-    .map((l) => l.getAttribute("href")!)
-    .filter(Boolean);
-  const region = doc.querySelector<HTMLElement>(machineRegion);
-  return { alternates, inPage: region ? region.innerText || region.textContent : null };
 }

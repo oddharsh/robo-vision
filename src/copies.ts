@@ -20,7 +20,8 @@
 // sessionStorage so it lasts the tab's session and no longer. A declared
 // alternate is always read, since a declaration is evidence and costs no guess.
 
-import { resolveMachineCopy, factsFromDocument, strippedPage, type MachineCopy } from "./source.ts";
+import { resolveMachineCopy, strippedPage, type MachineCopy } from "./source.ts";
+import { factsFromDocument } from "./facts-dom.ts";
 import { originMemory } from "./memory.ts";
 import { generateMarkdown } from "./generate.ts";
 import { keyOf as pageKey, isMarkdownUrl } from "./params.ts";

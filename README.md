@@ -15,6 +15,7 @@ src/copies.ts       the data layer: a copy for any same-origin URL, no rendering
 src/view.ts         the lazy half: renderPane(), plus copies.ts re-exported
 src/drop-in.ts      zero-markup mode: a docked toggle and a top-layer overlay
 src/facts-html.ts   the page's declarations read from HTML text, where there is no DOM
+src/facts-dom.ts    the same, read off a live Document; browser only, never published
 src/check.ts        the audit: every door opened, the answers compared, faults named
 src/memory.ts       what an origin has shown: the door that worked, sections that serve nothing
 src/reroute.ts      a 404, and which of the origin's real pages it meant

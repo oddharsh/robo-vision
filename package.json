@@ -35,6 +35,7 @@
     "prepublishOnly": "bun scripts/build.ts"
   },
   "devDependencies": {
+    "@types/node": "22",
     "playwright-core": "1.63.0",
     "typescript": "^7.0.2"
   }
