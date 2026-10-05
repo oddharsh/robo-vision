@@ -19,7 +19,7 @@
 // (copies.ts), an agent in a Map for the life of its process. Nothing here
 // touches a DOM.
 
-import { resolveMachineCopy, suffixCandidates, ORDER, type Attempt, type MachineCopy, type ResolveOptions, type Step } from "./source.ts";
+import { resolveMachineCopy, suffixCandidates, failedStatus, ORDER, type Attempt, type MachineCopy, type ResolveOptions, type Step } from "./source.ts";
 import { keyOf } from "./params.ts";
 
 /** string keys to string values; null deletes. sessionStorage fits, so does a Map */
@@ -121,15 +121,19 @@ export function originMemory(store: Store = mapStore(), { ttl = 3_600_000, now =
 //   - in a section marked quiet they are not asked at all, and the first is
 //     recorded as skipped, with the reason
 //   - a served copy, by any door, clears the mark: the section serves Markdown
-//   - a result marks the section quiet only if the guessed doors were asked
-//     and none hit. A page that skipped them, or stopped at an in-page region
-//     before reaching them, proves nothing either way
+//   - a result marks the section quiet only if the guessed doors were asked,
+//     every answer arrived, and none hit. A page that skipped them, or stopped
+//     at an in-page region before reaching them, proves nothing either way;
+//     nor does a dropped connection or a 503, which says nothing about the
+//     site and would have cost every page in the section its copy for the hour
 
 const GUESSED: Step[] = ["negotiated", "md-suffix"];
 
-/** were the guessed doors asked, and did any answer? */
+/** were the guessed doors asked, and did every answer arrive? */
 function guessed(attempts: Attempt[]): { asked: boolean } {
-  return { asked: attempts.some((a) => GUESSED.includes(a.step) && a.verdict !== undefined) };
+  const answers = attempts.filter((a) => GUESSED.includes(a.step) && a.verdict !== undefined);
+  const arrived = answers.every((a) => a.verdict !== "fetch-failed" && !(a.status !== undefined && failedStatus(a.status)));
+  return { asked: answers.length > 0 && arrived };
 }
 
 /**

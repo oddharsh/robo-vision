@@ -79,3 +79,14 @@ test("a null memory resolves plainly", async () => {
   expect(c.step).toBe("negotiated");
   expect(seen).toEqual(["md /a"]);
 });
+
+test("a guessed door that never answered marks nothing: a 503 or a dropped connection says nothing about the section", async () => {
+  const down = site({ "md /docs/a": { status: 503, body: "busy" }, "/docs/a.md": { status: 503, body: "busy" } });
+  const memory = originMemory();
+  await expect(resolveRemembered(`${O}/docs/a`, memory, { fetch: down.f, order: ["negotiated", "md-suffix"] })).rejects.toThrow();
+  expect(memory.servesNothing(`${O}/docs/b`)).toBe(false);
+
+  const reset = (async () => { throw new Error("ECONNRESET"); }) as unknown as typeof fetch;
+  await expect(resolveRemembered(`${O}/docs/a`, memory, { fetch: reset, order: ["negotiated", "md-suffix"] })).rejects.toThrow();
+  expect(memory.servesNothing(`${O}/docs/b`)).toBe(false);
+});

@@ -82,3 +82,26 @@ test("check audits a .md URL as a file: no page rules, no HTML fetch", async () 
   const gone = await checkPage(`${O}/z.md`, { fetch: site({}).f });
   expect(gone.findings.map((x) => x.rule)).toEqual(["page-unreachable"]);
 });
+
+test("a .md URL that redirects to its page gets that page's doors, from the HTML already in hand", async () => {
+  const seen: string[] = [];
+  // /docs/x.md redirects to /docs/x, an HTML page that declares its twin
+  const routes: Record<string, { type: string; body: string }> = {
+    "/docs/x": { type: "text/html", body: '<!doctype html><link rel="alternate" type="text/markdown" href="/raw/x"><p>X</p>' },
+    "/raw/x": { type: "text/markdown", body: "# X\n" },
+  };
+  const f = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    seen.push(url.pathname);
+    const at = url.pathname === "/docs/x.md" ? new URL("/docs/x", O) : url;
+    const r = routes[at.pathname];
+    const res = r ? new Response(r.body, { headers: { "content-type": r.type } }) : new Response("<!doctype html>404", { status: 404, headers: { "content-type": "text/html" } });
+    Object.defineProperty(res, "url", { value: at.href });
+    return res;
+  }) as typeof fetch;
+  const r = await fetchMachineCopy(`${O}/docs/x.md`, { fetch: f, memory: null });
+  expect(r.url).toBe(`${O}/docs/x`);
+  expect(r.copy!.step).toBe("link-alternate");
+  expect(r.attempts[0]).toMatchObject({ step: "md-url", verdict: "not-markdown" });
+  expect(seen).toEqual(["/docs/x.md", "/raw/x"]); // the page's HTML was not fetched twice
+});

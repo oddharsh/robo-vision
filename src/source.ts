@@ -120,6 +120,10 @@ export function looksLikeHtml(body: string): boolean {
   return /^<(?:!doctype|html|head|body)\b/i.test(lead);
 }
 
+/** A status that says the answer failed to arrive (a 5xx, a 429, a 408), not
+ *  what the site has: worth asking again, never worth remembering. */
+export const failedStatus = (s: number) => s >= 500 || s === 429 || s === 408;
+
 /** Judge a response as a Markdown twin: null on a hit, or what it is instead. */
 export function judge(res: Response, body: string, url: string): { verdict: Exclude<Verdict, "markdown" | "fetch-failed">; reason: string } | null {
   if (!res.ok) return { verdict: "http-error", reason: `HTTP ${res.status}` };

@@ -19,7 +19,7 @@
 // rank them and cannot invent one. The spelling chooser here needs nothing;
 // a decision model (Clef, as ry uses, or any classifier) is the second adapter.
 
-import { strippedPage, mediaType, looksLikeHtml } from "./source.ts";
+import { strippedPage, mediaType, looksLikeHtml, failedStatus } from "./source.ts";
 import type { OriginMemory, PageEntry } from "./memory.ts";
 
 /** where an origin's page list is read from, in the order given */
@@ -68,13 +68,19 @@ export interface RerouteResult {
 
 const MD_LINK = /\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)(?::\s*(.+))?/g;
 
-/** an llms.txt: the proposal's `- [Title](url): description` lines */
-export function pagesFromLlmsTxt(text: string, origin: string): PageEntry[] {
+// a link to a file is not a page a 404 could have meant
+const ASSET = /\.(?:png|jpe?g|gif|svg|webp|avif|ico|pdf|zip|gz|mp4|webm|mp3)$/i;
+
+/** an llms.txt: the proposal's `- [Title](url): description` lines. Relative
+ *  URLs resolve against `base`, the document they were read from */
+export function pagesFromLlmsTxt(text: string, origin: string, base: string = origin): PageEntry[] {
   const out: PageEntry[] = [];
   for (const m of text.matchAll(MD_LINK)) {
+    // ![alt](src) is an image, not a link
+    if (m.index > 0 && text[m.index - 1] === "!") continue;
     let url: URL;
-    try { url = new URL(m[2], origin); } catch { continue; }
-    if (url.origin !== origin) continue;
+    try { url = new URL(m[2], base); } catch { continue; }
+    if (url.origin !== origin || ASSET.test(url.pathname)) continue;
     url.hash = "";
     // llms.txt usually links the .md twin; the page is what a 404 was for
     const page = strippedPage(url.href) ?? url.href;
@@ -96,7 +102,6 @@ export function parseSitemap(xml: string): { index: boolean; locs: string[] } {
 // connection says nothing about the site, and remembering it as "no pages"
 // cost every later 404 on that origin its suggestions for the memory's hour.
 type Read = { ok: boolean; failed: boolean; type: string; text: string };
-const failedStatus = (s: number) => s >= 500 || s === 429 || s === 408;
 
 async function readCapped(f: typeof fetch, url: string, maxBytes: number, accept: string): Promise<Read> {
   try {
@@ -200,10 +205,12 @@ export async function pageList(origin: string, opts: RerouteOptions & { fetch?: 
   return { pages: [...byUrl.values()], sources };
 }
 
-/** same-origin links in a Markdown copy, as pages this origin has */
+/** same-origin links in a Markdown copy, as pages this origin has. `base` is
+ *  the page the copy is for: [Setup](setup) on /docs/guide/intro is
+ *  /docs/guide/setup, not /setup */
 export function linksIn(markdown: string, base: string): PageEntry[] {
   const origin = new URL(base).origin;
-  return pagesFromLlmsTxt(markdown, origin).map(({ url, title }) => ({ url, ...(title && { title }) }));
+  return pagesFromLlmsTxt(markdown, origin, base).map(({ url, title }) => ({ url, ...(title && { title }) }));
 }
 
 // ---- exact fixes ------------------------------------------------------------
@@ -225,8 +232,11 @@ function whatDiffered(from: string, to: string): string {
 
 /** the one real page this URL differs from only in spelling form, or null */
 export function exactFix(missing: string, pages: PageEntry[]): Rerouted | null {
-  const want = canon(new URL(missing).pathname);
-  const hits = new Set(pages.filter((p) => canon(new URL(p.url).pathname) === want && p.url !== missing).map((p) => new URL(p.url).origin + new URL(p.url).pathname));
+  const at = new URL(missing);
+  const want = canon(at.pathname);
+  // the same path is not a fix: the query rides along, so it would send the
+  // agent back to the URL that just 404'd
+  const hits = new Set(pages.map((p) => new URL(p.url)).filter((u) => canon(u.pathname) === want && u.pathname !== at.pathname).map((u) => u.origin + u.pathname));
   // two pages in one canonical form (/A and /a both exist) is not a fix
   if (hits.size !== 1) return null;
   const [path] = hits;
@@ -282,9 +292,13 @@ export const spellingChooser: Chooser = (missing, options) => {
 
 // ---- the whole step ---------------------------------------------------------
 
-export async function reroute(missing: string, opts: RerouteOptions & { fetch?: typeof fetch; memory?: OriginMemory } = {}): Promise<RerouteResult> {
+export async function reroute(missing: string, opts: RerouteOptions & { fetch?: typeof fetch; memory?: OriginMemory; dead?: string[] } = {}): Promise<RerouteResult> {
   const origin = new URL(missing).origin;
-  const { pages, sources } = await pageList(origin, opts);
+  const listed = await pageList(origin, opts);
+  // pages the list names that were followed and turned out gone
+  const dead = new Set((opts.dead ?? []).map((u) => { const x = new URL(u); return x.origin + x.pathname; }));
+  const pages = listed.pages.filter((p) => { const x = new URL(p.url); return !dead.has(x.origin + x.pathname); });
+  const { sources } = listed;
   const rerouted = exactFix(missing, pages);
   if (rerouted) return { rerouted, suggestions: [], sources };
   const options = pages.filter((p) => p.url !== missing);

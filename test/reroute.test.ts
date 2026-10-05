@@ -245,3 +245,31 @@ test("links in a copy become pages a later 404 can be matched against", async ()
   const r = await fetchMachineCopy(`${O}/docs/webhoks`, { fetch: f, memory });
   expect(r.suggestions![0]).toMatchObject({ url: `${O}/docs/webhooks`, title: "Webhooks" });
 });
+
+test("relative links in a copy resolve against its page; images and files are not pages", async () => {
+  const { f } = site({
+    "/docs/guide/intro": { body: page("Intro") },
+    "md /docs/guide/intro": { type: "text/markdown", body: "[Setup](setup), [API](../api/), ![logo](img/logo.png), [spec](spec.pdf)\n" },
+  });
+  const memory = originMemory();
+  await fetchMachineCopy(`${O}/docs/guide/intro`, { fetch: f, memory });
+  expect(memory.pages(O, "seen")!.map((p) => p.url)).toEqual([`${O}/docs/guide/setup`, `${O}/docs/api/`]);
+});
+
+test("a 404 that differs from a real page only in its query is suggested, not followed back to itself", async () => {
+  expect(exactFix(`${O}/pricing?a=1`, [{ url: `${O}/pricing` }])).toBeNull();
+  const { f } = site({ "/llms.txt": { type: "text/plain", body: LLMS } });
+  const r = await fetchMachineCopy(`${O}/pricing?a=1`, { fetch: f, memory: null });
+  expect(r.rerouted).toBeUndefined();
+  expect(r.suggestions![0].url).toBe(`${O}/pricing`);
+});
+
+test("a fix whose page is gone too is no reroute: the rest of the list is suggested", async () => {
+  const { f, seen } = site({ "/llms.txt": { type: "text/plain", body: LLMS } });
+  const r = await fetchMachineCopy(`${O}/Careers`, { fetch: f, memory: null });
+  expect(r.rerouted).toBeUndefined();
+  expect(r.status).toBe(404);
+  expect(r.url).toBe(`${O}/Careers`);
+  expect(r.suggestions!.map((s) => s.url)).not.toContain(`${O}/careers`);
+  expect(seen).toContain("/careers"); // the fix was tried before it was ruled out
+});
