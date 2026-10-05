@@ -107,6 +107,61 @@ test("with no sitemap named, /sitemap-index.xml is tried after /sitemap.xml (Ast
   expect(seen).toEqual(["/robots.txt", "/sitemap.xml", "/sitemap-index.xml", "/sitemap-0.xml"]);
 });
 
+test("a list that failed to arrive is not remembered; a 404 is", async () => {
+  const memory = originMemory();
+  let down = true;
+  const seen: string[] = [];
+  const f = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    seen.push(url.pathname);
+    if (down) throw new TypeError("network down");
+    const res = new Response(LLMS, { headers: { "content-type": "text/plain" } });
+    Object.defineProperty(res, "url", { value: url.href });
+    return res;
+  }) as typeof fetch;
+  const first = await reroute(`${O}/creers`, { fetch: f, memory });
+  expect(first.suggestions).toEqual([]);
+  expect(first.sources).toEqual([{ source: "llms", pages: 0, failed: true }]);
+  down = false;
+  const second = await reroute(`${O}/creers`, { fetch: f, memory });
+  expect(second.suggestions[0].url).toBe(`${O}/careers`); // asked again, and found
+
+  // a server error is a failure too; a 404 is an answer, and kept
+  const s503 = site({ "/llms.txt": { status: 503, body: "busy" } });
+  const m2 = originMemory();
+  await reroute(`${O}/x`, { fetch: s503.f, memory: m2 });
+  await reroute(`${O}/y`, { fetch: s503.f, memory: m2 });
+  expect(s503.seen).toEqual(["/llms.txt", "/llms.txt"]);
+  const s404 = site({});
+  const m3 = originMemory();
+  await reroute(`${O}/x`, { fetch: s404.f, memory: m3 });
+  await reroute(`${O}/y`, { fetch: s404.f, memory: m3 });
+  expect(s404.seen).toEqual(["/llms.txt"]);
+});
+
+test("a sitemap read that partly failed is used once, not remembered", async () => {
+  const memory = originMemory();
+  let child: Route = { status: 502, body: "bad gateway" };
+  const routes: Record<string, Route> = {
+    "/robots.txt": { type: "text/plain", body: `Sitemap: ${O}/sm.xml\n` },
+    "/sm.xml": { type: "application/xml", body: `<sitemapindex><sitemap><loc>${O}/a.xml</loc></sitemap><sitemap><loc>${O}/b.xml</loc></sitemap></sitemapindex>` },
+    "/a.xml": { type: "application/xml", body: `<urlset><url><loc>${O}/guides/one/</loc></url></urlset>` },
+  };
+  const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(String(input)).pathname;
+    const r = path === "/b.xml" ? child : routes[path] ?? { status: 404, body: "" };
+    const res = new Response(r.body, { status: r.status ?? 200, headers: { "content-type": r.type ?? "text/html" } });
+    Object.defineProperty(res, "url", { value: new URL(String(input)).href });
+    return res;
+  }) as typeof fetch;
+  const first = await reroute(`${O}/guides/one`, { fetch: f, memory, pages: ["sitemap"] });
+  expect(first.rerouted!.to).toBe(`${O}/guides/one/`); // what did arrive is still used
+  expect(first.sources).toEqual([{ source: "sitemap", pages: 1, failed: true }]);
+  child = { type: "application/xml", body: `<urlset><url><loc>${O}/guides/two/</loc></url></urlset>` };
+  const second = await reroute(`${O}/guides/two`, { fetch: f, memory, pages: ["sitemap"] });
+  expect(second.rerouted!.to).toBe(`${O}/guides/two/`);
+});
+
 test("a list is read once per origin", async () => {
   const { f, seen } = site({ "/llms.txt": { type: "text/plain", body: LLMS } });
   const memory = originMemory();
