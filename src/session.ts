@@ -98,7 +98,10 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
 
   async function present(url: string) {
     const key = keyOf(url);
-    if (shown === key) return;
+    // already drawn, and nothing newer is loading over it. With a load in
+    // flight the pane holds "loading", so even the page it last drew has to be
+    // drawn again: Back from a slow link lands here
+    if (shown === key && showing === key) return;
     showing = key;
     show({ kind: "loading", url: key });
     try {

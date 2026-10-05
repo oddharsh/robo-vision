@@ -132,6 +132,19 @@ test("a slow page cannot land over a newer one", async () => {
   expect(b.shown.filter((s) => s.kind === "copy").map((s) => (s as { url: string }).url)).toEqual([`${O}/d`]);
 });
 
+test("Back while a link is still loading shows the page Back went to", async () => {
+  let release!: () => void;
+  const slow = new Promise<void>((r) => (release = r));
+  const b = browser("/a?robo-vision=machine", { copies: TWINS, delay: { "/b": slow } });
+  await b.session.start();
+  const going = b.session.open(`${O}/b`);
+  await b.back("/a?robo-vision=machine");
+  release();
+  await going;
+  expect(b.address()).toBe("/a?robo-vision=machine");
+  expect(b.last()).toBe("document /a");
+});
+
 test("a pasted machine link starts in machine view", async () => {
   const b = browser("/d?robo-vision=machine", { copies: TWINS });
   await b.session.start();
