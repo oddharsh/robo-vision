@@ -47,6 +47,9 @@ export function copyForThisPage(page: string, opts: { exclude?: string[] } = {})
     generate: () => generateMarkdown(document, { exclude: opts.exclude }),
   });
   cache.set(key, p);
+  // a failure is not kept: the next press of Machine asks again, as copyFor's
+  // misses do. Only this promise is dropped, never a newer one under the key
+  p.catch(() => { if (cache.get(key) === p) cache.delete(key); });
   return p;
 }
 
