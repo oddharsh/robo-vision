@@ -111,7 +111,12 @@ async function styleOf(page: Page) {
     b.parentElement!.append(probe);
     const [cr, cg, cb] = getComputedStyle(probe).color.match(/\d+/g)!.map(Number);
     probe.remove();
-    return { rect: { x: r.x, y: r.y, w: r.width, h: r.height }, dark: cr + cg + cb > 382, css: Object.fromEntries(props.map((p) => [p, cs[p as keyof CSSStyleDeclaration] as string])) };
+    // the family base.css MEANS to give the toggle: the page's body, or the
+    // fallback robo-vision set because that body sits at the browser default
+    const dock = b.closest<HTMLElement>(".rv-dock");
+    const fallback = dock?.style.getPropertyValue("--rv-font-fallback").trim();
+    const family = fallback ? getComputedStyle(dock!).fontFamily : getComputedStyle(document.body).fontFamily;
+    return { rect: { x: r.x, y: r.y, w: r.width, h: r.height }, dark: cr + cg + cb > 382, family, css: Object.fromEntries(props.map((p) => [p, cs[p as keyof CSSStyleDeclaration] as string])) };
   }, STYLE_PROPS as unknown as string[]);
 }
 
@@ -226,7 +231,13 @@ async function runSite(browser: Awaited<ReturnType<typeof chromium.launch>>, sit
     r.style = st;
     const base = bases[st?.dark ? "dark" : "light"];
     r.scheme = st?.dark ? "dark" : "light";
-    const drift = st ? STYLE_PROPS.filter((p) => st.css[p] !== base.css[p]).map((p) => `${p}: ${base.css[p]} -> ${st.css[p]}`) : [];
+    // The family is the page's by design (base.css), so it is judged against
+    // what the page should hand down, not the blank-page baseline. Width
+    // follows the font's metrics, so it is only comparable when the family
+    // matches the baseline's.
+    const expect = (p: string) => (p === "fontFamily" ? st!.family : base.css[p]);
+    const comparable = (p: string) => p !== "width" || st!.css.fontFamily === base.css.fontFamily;
+    const drift = st ? STYLE_PROPS.filter((p) => comparable(p) && st.css[p] !== expect(p)).map((p) => `${p}: ${expect(p)} -> ${st.css[p]}`) : [];
     r.styleDrift = drift;
     if (drift.length) find(`page CSS changed the toggle (${drift.length} props)`);
 

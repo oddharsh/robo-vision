@@ -21,7 +21,7 @@
 // session.ts. This element hands it the real history, the lazy copies and the
 // mode attribute, and draws what it is told to show.
 
-import { getMode, setMode, initMode, EVENT, type Mode } from "./mode.ts";
+import { getMode, setMode, initMode, reveal, EVENT, type Mode } from "./mode.ts";
 import { paneSession, type PaneSession, type Shown } from "./session.ts";
 
 export type ViewModule = typeof import("./view.ts");
@@ -103,6 +103,9 @@ export class ModeToggle extends HTMLElement {
     window.addEventListener("popstate", () => void this.#session.popstate());
     initMode();
     this.#sync();
+    // the pane is open now, so the page the pre-paint snippet hid can show;
+    // same task as the open, so nothing paints in between
+    reveal();
     void this.#session.start();
   }
 

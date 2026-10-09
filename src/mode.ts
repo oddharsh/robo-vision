@@ -78,10 +78,24 @@ export function initMode(): Mode {
   return m;
 }
 
-/**
- * Inline this in <head>, before any stylesheet that keys on the attribute. It is
- * the only piece that must be synchronous: a deferred module would paint the
- * human page first and then swap, which is the flash Cloudflare's own snippet
- * exists to prevent. Stringified so a build can hash it for CSP.
- */
-export const PREPAINT = `(function(){try{var q=new URLSearchParams(location.search).get(${JSON.stringify(PARAM)}),m=q||localStorage.getItem(${JSON.stringify(KEY)});if(m==="machine"||m==="human")document.documentElement.setAttribute(${JSON.stringify(ATTR)},m)}catch(e){}})();`;
+/** set by the pre-paint snippet while a machine view is on its way; the page
+ *  is hidden until the pane is up, so it never paints the human page first */
+export const PENDING = "data-robo-vision-pending";
+/** how long the snippet hides a page before showing it anyway. A host that
+ *  inlines the snippet and then never loads robo-vision (a page it skipped,
+ *  a failed fetch) costs a visitor this long, once, and no longer */
+export const PENDING_MS = 3000;
+
+/** show the page the snippet hid; the toggle calls it once the pane is up,
+ *  in the same task, so the browser never paints the gap between the two */
+export function reveal(): void {
+  const d = document.documentElement;
+  if (!d.hasAttribute(PENDING)) return;
+  d.removeAttribute(PENDING);
+  d.style.removeProperty("visibility");
+}
+
+// The pre-paint snippet that sets PENDING lives in prepaint.ts, a module the
+// drop-in never imports: it is a string the HOST ships, and as a template
+// built from JSON.stringify calls no bundler can prove it unused, so kept
+// here it rode along in every visitor's entry as 530 bytes of dead text.

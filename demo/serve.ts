@@ -4,7 +4,7 @@
 //
 //   bun demo/serve.ts [port]
 
-import { PREPAINT } from "../src/mode.ts";
+import { PREPAINT } from "../src/prepaint.ts";
 
 const port = Number(process.argv[2] ?? 8841);
 const here = new URL(".", import.meta.url).pathname;
