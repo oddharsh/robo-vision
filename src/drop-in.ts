@@ -7,9 +7,9 @@
 // hidden, re-parented, or restyled, which is what makes it safe to try on a
 // site you did not write.
 //
-//   dropIn({ corner: "bottom-right", css });
+//   dropIn({ corner: "bottom-right", css, loadView });
 //
-// drop-in-entry.ts is the caller: it reads the options off the script tag.
+// drop-in-boot.ts is the caller: it reads the options off the script tag.
 
 import type { ModeToggle } from "./mode-toggle.ts";
 import "./mode-toggle.ts";
@@ -22,11 +22,13 @@ export interface DropInOptions {
   css?: string;
   /** button text, e.g. { machine: "Agent" }; defaults Human / Machine */
   labels?: { human?: string; machine?: string };
+  /** how the view (resolver, generator, pane) arrives on first use */
+  loadView: ModeToggle["loadView"];
 }
 
 export const MARK = "data-robo-vision";
 
-export function dropIn(opts: DropInOptions = {}): { dock: HTMLElement; pane: HTMLElement } | null {
+export function dropIn(opts: DropInOptions): { dock: HTMLElement; pane: HTMLElement } | null {
   if (document.querySelector(`[${MARK}]`)) return null; // idempotent: one dock per page
 
   adopt(opts.css ?? "");
@@ -48,7 +50,7 @@ export function dropIn(opts: DropInOptions = {}): { dock: HTMLElement; pane: HTM
   if (opts.labels?.machine) toggle.setAttribute("machine-label", opts.labels.machine);
   // set before the element connects: a stored machine mode loads the view
   // straight away, and it has to be this loader that does it
-  toggle.loadView = () => import("./drop-in-view.ts");
+  toggle.loadView = opts.loadView;
   dock.append(toggle);
 
   // both go in the top layer where the browser has it (Chrome 114, Safari 17,

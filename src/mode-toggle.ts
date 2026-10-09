@@ -34,7 +34,13 @@ export const SHOWN_EVENT = "robo-vision:shown";
 export class ModeToggle extends HTMLElement {
   /** how the view code arrives; drop-in mode swaps in a loader that also
    *  brings the pane's skin */
-  loadView: () => Promise<ViewModule> = () => import("./view.ts");
+  //
+  // By a URL resolved at runtime against this file's own, never a literal
+  // import("./view.ts"): a bundler that sees the literal either splits it and
+  // may hoist shared modules into a chunk the entry imports eagerly, or inlines
+  // the whole view into the file every visitor loads. Either way the lazy half
+  // stops being lazy. Ship view.js beside this file, or set loadView yourself.
+  loadView: () => Promise<ViewModule> = () => import(new URL("./view.js", import.meta.url).href) as Promise<ViewModule>;
 
   #view: Promise<ViewModule> | null = null;
   /** the view once it has arrived; show() only draws copies it fetched */

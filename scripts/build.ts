@@ -46,20 +46,34 @@ const define = {
   __ROBO_VISION_PANE_CSS__: JSON.stringify(paneCss),
 };
 
+// the view, one file, built first so the entry can be told its name
+const viewBuild = await Bun.build({
+  entrypoints: [root + "src/drop-in-view.ts"],
+  outdir: dist,
+  format: "esm",
+  target: "browser",
+  minify: true,
+  define,
+  naming: { entry: "chunks/view-[hash].js" },
+});
+if (!viewBuild.success) throw new AggregateError(viewBuild.logs, "view build failed");
+const viewFile = viewBuild.outputs[0].path.slice(dist.length); // chunks/view-<hash>.js
+
+// the entry: the toggle, its state and base styles, and a runtime URL to the
+// view. splitting stays OFF, so there is no chunk graph for Bun to reshape
 const lazy = await Bun.build({
   entrypoints: [root + "src/drop-in-entry.ts"],
   outdir: dist,
   format: "esm",
-  splitting: true,
   target: "browser",
   minify: true,
-  define,
-  naming: { entry: "robo-vision.js", chunk: "chunks/[name]-[hash].js" },
+  define: { ...define, __ROBO_VISION_VIEW__: JSON.stringify("./" + viewFile) },
+  naming: { entry: "robo-vision.js" },
 });
 if (!lazy.success) throw new AggregateError(lazy.logs, "lazy build failed");
 
 const eager = await Bun.build({
-  entrypoints: [root + "src/drop-in-entry.ts"],
+  entrypoints: [root + "src/drop-in-entry-eager.ts"],
   format: "iife",
   target: "browser",
   minify: true,
@@ -88,6 +102,6 @@ if (tsc.exitCode !== 0) throw new Error("declarations failed");
 const gz = async (p: string) => Bun.gzipSync(new Uint8Array(await Bun.file(p).arrayBuffer()), { level: 9 }).length;
 const row = async (p: string) => `${p.replace(dist, "dist/").padEnd(42)} ${String(Bun.file(p).size).padStart(6)} B  ${String(await gz(p)).padStart(6)} B gz`;
 console.log(`css: ${css.length} B up front (base), ${paneCss.length} B with the view`);
-for (const o of lazy.outputs) console.log(await row(o.path));
+for (const o of [...lazy.outputs, ...viewBuild.outputs]) console.log(await row(o.path));
 console.log(await row(dist + "robo-vision.eager.js"));
 for (const o of [...lib.outputs, ...cli.outputs]) console.log(await row(o.path));

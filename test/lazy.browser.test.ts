@@ -59,6 +59,10 @@ test("the entry carries none of the view: it lives in chunks", async () => {
     expect(entry.includes(s), `entry must not contain ${JSON.stringify(s)}`).toBe(false);
     expect(lazy.includes(s), `chunks must contain ${JSON.stringify(s)}`).toBe(true);
   }
+  // and no static import at all: a splitter that hoists a shared module into a
+  // chunk the entry imports eagerly puts a second request on every page load
+  expect(entry).not.toMatch(/(?:^|[;{}])import\s*[^(]/);
+  expect(entry).toMatch(/import\(new URL\(/); // the view, by runtime URL
 });
 
 test("no @font-face ships: it cannot be scoped, so it would restyle the host page", async () => {

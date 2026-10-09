@@ -1,34 +1,15 @@
-// drop-in-entry.ts: the drop-in's body. One script tag, no markup.
+// drop-in-entry.ts: the lazy drop-in, dist/robo-vision.js. One script tag.
 //
-// WHEN it mounts is the part that costs the host page. Mounting adopts a
-// stylesheet, and adding a sheet makes the browser recalculate style for the
-// whole document: measured at 5 to 17 ms per page load across six live sites.
-// A visitor who arrives in machine view needs the dock at once. Everyone else
-// gets it after the page's own load event, when the main thread is idle, so
-// robo-vision never competes with the page's first paint or its LCP element.
-import { dropIn } from "./drop-in.ts";
-import { requestedMode } from "./mode.ts";
+// The view (resolver, generator, pane) is a SEPARATE file the build writes to
+// chunks/, and this entry reaches it by a URL resolved at runtime against its
+// own. No bundler sees an import graph here, so none can reshape it: with a
+// literal import() and code splitting on, Bun's splitter moved the modules the
+// entry and the view both use (mode.ts, adopt.ts) into a shared chunk the
+// entry had to import STATICALLY, a second request on every page load. The
+// lazy tests caught it on 2026-10-09; this shape cannot regress that way.
+import { boot } from "./drop-in-boot.ts";
+import type { ViewModule } from "./mode-toggle.ts";
 
-declare const __ROBO_VISION_CSS__: string;
+declare const __ROBO_VISION_VIEW__: string; // "./chunks/view-<hash>.js", from the build
 
-// configuration rides on the script tag itself, so adopting robo-vision needs
-// no JavaScript of the site's own:
-//   <script type="module" src="/robo-vision/robo-vision.js"
-//           data-corner="bottom-left" data-machine-label="Agent"></script>
-const tag = document.querySelector<HTMLScriptElement>('script[src*="robo-vision"][data-corner], script[src*="robo-vision"][data-human-label], script[src*="robo-vision"][data-machine-label]');
-const cfg = tag?.dataset ?? {};
-const go = () => dropIn({
-  css: __ROBO_VISION_CSS__,
-  corner: cfg.corner as "bottom-right" | "bottom-left" | "top-right" | "top-left" | undefined,
-  labels: { human: cfg.humanLabel, machine: cfg.machineLabel },
-});
-
-const whenBody = () => (document.body ? go() : document.addEventListener("DOMContentLoaded", go, { once: true }));
-const whenIdle = () => {
-  const idle = () => ("requestIdleCallback" in window ? requestIdleCallback(go, { timeout: 2000 }) : setTimeout(go, 1));
-  if (document.readyState === "complete") idle();
-  else addEventListener("load", idle, { once: true });
-};
-
-if (requestedMode() === "machine") whenBody();
-else whenIdle();
+boot(() => import(new URL(__ROBO_VISION_VIEW__, import.meta.url).href) as Promise<ViewModule>);

@@ -9,15 +9,14 @@ import { PREPAINT } from "../src/mode.ts";
 const port = Number(process.argv[2] ?? 8841);
 const here = new URL(".", import.meta.url).pathname;
 
-// split like the real build, so the demo exercises the lazy view: the toggle
-// loads with the page, view.ts arrives on hover or first click
+// two files, like the real build: the toggle loads with the page, and view.js
+// beside it arrives on hover or first click through the toggle's runtime URL
 const built = await Bun.build({
-  entrypoints: [`${here}../src/mode-toggle.ts`],
+  entrypoints: [`${here}../src/mode-toggle.ts`, `${here}../src/view.ts`],
   target: "browser",
   format: "esm",
-  splitting: true,
   minify: false,
-  naming: { entry: "[name].js", chunk: "chunks/[name]-[hash].js" },
+  naming: { entry: "[name].js" },
 });
 if (!built.success) throw new AggregateError(built.logs, "bundle failed");
 const js = new Map<string, string>();
