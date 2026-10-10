@@ -185,9 +185,12 @@ Workers.
 
 **It remembers each origin** for an hour, in a Map: the door that served last
 is asked first, and a section that served nothing is not asked again. A site
-that serves `.md` twins costs 2 requests a page after the first. Pass
-`memory: originMemory(store)` to keep it elsewhere (any `get`/`set` of strings),
-or `memory: null`.
+that serves `.md` twins costs 2 requests a page after the first. The Map holds
+10,000 entries and 16 million characters at most, dropping the least recently
+used. Each set of `headers` keeps its own facts, so a caller with a cookie
+never hands its private links to another caller's 404. Pass
+`memory: originMemory(store)` to keep it elsewhere (any `get`/`set` of strings;
+give each caller a `scope` if their headers differ), or `memory: null`.
 
 **On a 404 it reads the site's page list** and does one of two things:
 
@@ -199,7 +202,9 @@ or `memory: null`.
 The list is `llms.txt` by default (one request, with titles) plus the links in
 copies already read on that origin. `reroute: { pages: ["llms", "sitemap"] }`
 adds the sitemap, found through `robots.txt`, then `/sitemap.xml`, then
-`/sitemap-index.xml`, with indexes walked and reads capped at 5 MB.
+`/sitemap-index.xml`, with indexes walked and reads capped at 5 MB. A sitemap
+is read only from the site itself or a subdomain of it, so a `robots.txt`
+cannot point the agent at `169.254.169.254` or `localhost`.
 `reroute: false` returns the bare 404.
 
 The candidates are a closed set: a chooser ranks the origin's own pages and

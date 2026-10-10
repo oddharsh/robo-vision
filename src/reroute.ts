@@ -131,6 +131,25 @@ async function readCapped(f: typeof fetch, url: string, maxBytes: number, accept
 
 type Listed = { entries: PageEntry[]; failed: boolean };
 
+/**
+ * May a sitemap at `url` be read for `origin`? Only on the origin itself, or
+ * on its host or a subdomain of it at the default port: example.com and
+ * cdn.example.com for www.example.com. robots.txt and a sitemap index are the
+ * site's to write, and a wider rule would let a site point the agent's host
+ * at an address it picks (169.254.169.254, localhost:8080). No IP literal and
+ * no localhost is a subdomain of a site's name, so this refuses those without
+ * listing them. A redirect is still followed, as it is for the page itself.
+ */
+function onSite(url: string, origin: string): boolean {
+  let u: URL;
+  try { u = new URL(url, origin); } catch { return false; }
+  const o = new URL(origin);
+  if (u.origin === o.origin) return true;
+  if ((u.protocol !== "https:" && u.protocol !== "http:") || u.port) return false;
+  const site = o.hostname.replace(/^www\./, "");
+  return u.hostname === site || u.hostname.endsWith(`.${site}`);
+}
+
 async function readLlms(f: typeof fetch, origin: string, o: Required<Pick<RerouteOptions, "maxBytes">>): Promise<Listed> {
   const r = await readCapped(f, `${origin}/llms.txt`, o.maxBytes, "text/markdown, text/plain");
   // a single-page app answers /llms.txt with its shell and a 200
@@ -143,7 +162,7 @@ async function readSitemaps(f: typeof fetch, origin: string, o: Required<Pick<Re
   const robots = start ? null : await readCapped(f, `${origin}/robots.txt`, 256 * 1024, "text/plain");
   // any read that failed to arrive makes the whole list partial
   let failed = robots?.failed ?? false;
-  const named = start ? [start] : robots?.ok ? [...robots.text.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => m[1]) : [];
+  const named = start ? [start] : robots?.ok ? [...robots.text.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => m[1]).filter((u) => onSite(u, origin)) : [];
   // unnamed, try the two defaults: /sitemap.xml (Next.js, most CMSs) and
   // /sitemap-index.xml (Astro's @astrojs/sitemap; docs.astro.build has only it)
   const queue = named.length ? named : [`${origin}/sitemap.xml`];
@@ -165,9 +184,9 @@ async function readSitemaps(f: typeof fetch, origin: string, o: Required<Pick<Re
     for (const loc of locs) {
       let u: URL;
       try { u = new URL(loc, origin); } catch { continue; }
-      if (u.origin !== origin) continue;
-      if (index) queue.push(u.href);
-      else { u.hash = ""; pages.add(u.href); }
+      // a child sitemap may sit on a CDN subdomain; a page must be the origin's
+      if (index) { if (onSite(u.href, origin)) queue.push(u.href); }
+      else if (u.origin === origin) { u.hash = ""; pages.add(u.href); }
     }
   }
   if (fallback && !pages.size && seen.size < o.maxSitemaps) {

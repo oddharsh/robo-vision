@@ -2,7 +2,7 @@
 // Every caller (the tab's loaded page, its linked pages, an agent's fetch)
 // goes through this one call, so these are the rules for all three.
 import { test, expect } from "bun:test";
-import { originMemory, resolveRemembered, type OriginMemory } from "../src/memory.ts";
+import { originMemory, mapStore, resolveRemembered, type OriginMemory } from "../src/memory.ts";
 
 const O = "https://example.test";
 type Route = { status?: number; type?: string; body: string };
@@ -89,4 +89,50 @@ test("a guessed door that never answered marks nothing: a 503 or a dropped conne
   const reset = (async () => { throw new Error("ECONNRESET"); }) as unknown as typeof fetch;
   await expect(resolveRemembered(`${O}/docs/a`, memory, { fetch: reset, order: ["negotiated", "md-suffix"] })).rejects.toThrow();
   expect(memory.servesNothing(`${O}/docs/b`)).toBe(false);
+});
+
+// ---- bounds: a long-lived agent visits origins without end ------------------
+
+test("a map store drops its oldest entry past the cap, and a read keeps an entry fresh", () => {
+  const s = mapStore({ entries: 2 });
+  s.set("a", "1");
+  s.set("b", "2");
+  s.get("a"); // read: now the newest
+  s.set("c", "3");
+  expect([s.get("a"), s.get("b"), s.get("c")]).toEqual(["1", null, "3"]);
+});
+
+test("a map store holds to its size budget, and refuses a value bigger than all of it", () => {
+  const s = mapStore({ chars: 10 });
+  s.set("a", "1234");
+  s.set("b", "5678");
+  expect(s.get("a")).toBe("1234"); // 10 chars, keys included: at the budget
+  s.set("c", "9");
+  expect(s.get("b")).toBeNull(); // b was oldest once a was read
+  s.set("d", "x".repeat(20));
+  expect(s.get("d")).toBeNull();
+  expect(s.get("c")).toBe("9");
+});
+
+test("an expired fact is deleted when read, not kept until overwritten", () => {
+  let t = 0;
+  const store = mapStore();
+  const memory = originMemory(store, { ttl: 1000, now: () => t });
+  memory.noteNothing(`${O}/blog/a`, true);
+  const key = `robo-vision:${O}:none:blog`;
+  expect(store.get(key)).not.toBeNull();
+  t = 1001;
+  expect(memory.servesNothing(`${O}/blog/z`)).toBe(false);
+  expect(store.get(key)).toBeNull();
+});
+
+test("a scoped memory shares a store without sharing facts", () => {
+  const store = mapStore();
+  const a = originMemory(store, { scope: "tenant-a" });
+  const b = originMemory(store, { scope: "tenant-b" });
+  a.noteNothing(`${O}/blog/a`, true);
+  a.setPages(O, "seen", [{ url: `${O}/private/plan` }]);
+  expect(b.servesNothing(`${O}/blog/z`)).toBe(false);
+  expect(b.pages(O, "seen")).toBeNull();
+  expect(originMemory(store, { scope: "tenant-a" }).pages(O, "seen")).toEqual([{ url: `${O}/private/plan` }]);
 });

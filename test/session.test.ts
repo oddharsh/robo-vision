@@ -17,7 +17,7 @@ function browser(start: string, fake: Fake = {}) {
   const shown: Shown[] = [];
   const path = (u: string) => u.replace(O, "");
   const copies: PaneCopies = {
-    async forDocument() { calls.push("copy:document"); return copy(`document ${path(new URL(address).pathname)}`, "generated"); },
+    async forDocument() { calls.push("copy:document"); await fake.delay?.document; return copy(`document ${path(new URL(address).pathname)}`, "generated"); },
     async forUrl(url) { calls.push(`copy:${path(url)}`); await fake.delay?.[path(url)]; return fake.copies?.[path(url)] ?? null; },
     async pageBehind(md) { calls.push(`behind:${path(md)}`); const p = fake.pages?.[path(md)]; return p ? O + p : null; },
   };
@@ -143,6 +143,65 @@ test("Back while a link is still loading shows the page Back went to", async () 
   await going;
   expect(b.address()).toBe("/a?robo-vision=machine");
   expect(b.last()).toBe("document /a");
+});
+
+test("a slow .md click cannot land after a newer click", async () => {
+  let release!: () => void;
+  const slow = new Promise<void>((r) => (release = r));
+  const b = browser("/a?robo-vision=machine", { copies: TWINS, pages: { "/m/mirror.md": "/m/mirror" }, delay: { "/m/mirror.md": slow } });
+  const first = b.session.open(`${O}/m/mirror.md`);
+  await b.session.open(`${O}/d`);
+  release();
+  await first;
+  expect(b.address()).toBe("/d?robo-vision=machine");
+  expect(b.last()).toBe("D twin");
+  expect(b.calls).not.toContain("push:/m/mirror?robo-vision=machine");
+});
+
+test("Back during a slow .md click stays where Back went, with the forward stack intact", async () => {
+  let release!: () => void;
+  const slow = new Promise<void>((r) => (release = r));
+  const b = browser("/a?robo-vision=machine", { copies: TWINS, pages: { "/m/mirror.md": "/m/mirror" }, delay: { "/m/mirror.md": slow } });
+  await b.session.start();
+  const going = b.session.open(`${O}/m/mirror.md`);
+  await b.back("/a?robo-vision=machine");
+  release();
+  await going;
+  expect(b.address()).toBe("/a?robo-vision=machine");
+  expect(b.calls.filter((c) => c.startsWith("push:"))).toEqual([]);
+});
+
+test("a .md click shows loading before its page is checked", async () => {
+  const slow = new Promise<void>(() => {});
+  const b = browser("/a?robo-vision=machine", { copies: TWINS, pages: { "/m/mirror.md": "/m/mirror" }, delay: { "/m/mirror.md": slow } });
+  void b.session.open(`${O}/m/mirror.md`);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(b.shown.at(-1)).toEqual({ kind: "loading", url: `${O}/m/mirror.md` });
+});
+
+test("Human while a no-copy page is loading stays in Human", async () => {
+  let release!: () => void;
+  const slow = new Promise<void>((r) => (release = r));
+  const b = browser("/a?robo-vision=machine", { copies: TWINS, delay: { "/c": slow } });
+  const going = b.session.open(`${O}/c`);
+  await b.session.choose("human");
+  release();
+  await going;
+  expect(b.calls.filter((c) => c.startsWith("load:"))).toEqual(["load:/c"]);
+  expect(b.mode()).toBe("human");
+});
+
+test("Machine then Human before the document resolves ends in Human", async () => {
+  let release!: () => void;
+  const slow = new Promise<void>((r) => (release = r));
+  const b = browser("/a", { delay: { document: slow } });
+  const machine = b.session.choose("machine");
+  await b.session.choose("human");
+  release();
+  await machine;
+  expect(b.mode()).toBe("human");
+  expect(b.address()).toBe("/a");
+  expect(b.shown).toEqual([]);
 });
 
 test("a pasted machine link starts in machine view", async () => {
