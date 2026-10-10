@@ -202,7 +202,9 @@ give each caller a `scope` if their headers differ), or `memory: null`.
 The list is `llms.txt` by default (one request, with titles) plus the links in
 copies already read on that origin. `reroute: { pages: ["llms", "sitemap"] }`
 adds the sitemap, found through `robots.txt`, then `/sitemap.xml`, then
-`/sitemap-index.xml`, with indexes walked and reads capped at 5 MB.
+`/sitemap-index.xml`, with indexes walked and reads capped at 5 MB. A sitemap
+is read only from the site itself or a subdomain of it, so a `robots.txt`
+cannot point the agent at `169.254.169.254` or `localhost`.
 `reroute: false` returns the bare 404.
 
 The candidates are a closed set: a chooser ranks the origin's own pages and

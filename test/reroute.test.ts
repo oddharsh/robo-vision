@@ -301,3 +301,44 @@ test("the default memory keeps one caller's private links from another's 404", a
   const b = await fetchMachineCopy(`${T}/private/plaan`, { fetch: f });
   expect(b.suggestions).toEqual([]);
 });
+
+// ---- where a sitemap may be read from ----------------------------------------
+
+function hosts(origin: string, routes: Record<string, string>) {
+  const seen: string[] = [];
+  const f = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    seen.push(url.href);
+    const body = routes[url.href];
+    const res = body === undefined
+      ? new Response("not found", { status: 404, headers: { "content-type": "text/plain" } })
+      : new Response(body, { headers: { "content-type": url.pathname.endsWith(".txt") ? "text/plain" : "application/xml" } });
+    Object.defineProperty(res, "url", { value: url.href });
+    return res;
+  }) as typeof fetch;
+  return { f, seen, origin };
+}
+
+test("robots.txt cannot point the agent at an address off the site", async () => {
+  const { f, seen } = hosts(O, {
+    [`${O}/robots.txt`]: "Sitemap: http://169.254.169.254/latest/meta-data/\nSitemap: http://localhost:8080/admin\nSitemap: https://other.test/sm.xml\nSitemap: https://example.test:8443/sm.xml\n",
+    [`${O}/sitemap.xml`]: `<urlset><url><loc>${O}/pricing</loc></url></urlset>`,
+  });
+  const r = await reroute(`${O}/pricng`, { fetch: f, pages: ["sitemap"] });
+  // none of the four is asked; with nothing named that is on the site, the defaults are
+  expect(seen).toEqual([`${O}/robots.txt`, `${O}/sitemap.xml`]);
+  expect(r.suggestions[0].url).toBe(`${O}/pricing`);
+});
+
+test("a sitemap on a subdomain is read, and an index there can name its children", async () => {
+  const W = "https://www.example.test";
+  const { f, seen } = hosts(W, {
+    [`${W}/robots.txt`]: "Sitemap: https://cdn.example.test/sm-index.xml\n",
+    "https://cdn.example.test/sm-index.xml": `<sitemapindex><sitemap><loc>https://cdn.example.test/sm-1.xml</loc></sitemap><sitemap><loc>http://10.0.0.5/sm-2.xml</loc></sitemap></sitemapindex>`,
+    "https://cdn.example.test/sm-1.xml": `<urlset><url><loc>${W}/pricing</loc></url><url><loc>https://cdn.example.test/logo</loc></url></urlset>`,
+  });
+  const r = await reroute(`${W}/pricng`, { fetch: f, pages: ["sitemap"] });
+  expect(seen).toEqual([`${W}/robots.txt`, "https://cdn.example.test/sm-index.xml", "https://cdn.example.test/sm-1.xml"]);
+  // the pages themselves stay on the origin
+  expect(r.suggestions.map((s) => s.url)).toEqual([`${W}/pricing`]);
+});
