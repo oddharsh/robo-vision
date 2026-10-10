@@ -273,3 +273,31 @@ test("a fix whose page is gone too is no reroute: the rest of the list is sugges
   expect(r.suggestions!.map((s) => s.url)).not.toContain(`${O}/careers`);
   expect(seen).toContain("/careers"); // the fix was tried before it was ruled out
 });
+
+test("the default memory keeps one caller's private links from another's 404", async () => {
+  // an origin of its own: the default memory lives as long as the process
+  const T = "https://tenants.test";
+  const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const h = new Headers(init?.headers);
+    const md = /markdown/.test(h.get("accept") ?? "");
+    const signedIn = h.get("cookie") === "session=a";
+    let res: Response;
+    if (url.pathname === "/docs/a" && signedIn) {
+      res = md
+        ? new Response("See [Plan](/private/plan).\n", { headers: { "content-type": "text/markdown", vary: "Accept" } })
+        : new Response(page("A"), { headers: { "content-type": "text/html", vary: "Accept" } });
+    } else res = new Response("<!doctype html>not found", { status: 404, headers: { "content-type": "text/html" } });
+    Object.defineProperty(res, "url", { value: url.href });
+    return res;
+  }) as typeof fetch;
+
+  const a = await fetchMachineCopy(`${T}/docs/a`, { fetch: f, headers: { cookie: "session=a" } });
+  expect(a.copy?.text).toContain("/private/plan");
+  // the same caller still gets its own links back
+  const again = await fetchMachineCopy(`${T}/private/plaan`, { fetch: f, headers: { Cookie: "session=a" } });
+  expect(again.suggestions!.map((s) => s.url)).toEqual([`${T}/private/plan`]);
+  // a caller with no cookie gets none of them
+  const b = await fetchMachineCopy(`${T}/private/plaan`, { fetch: f });
+  expect(b.suggestions).toEqual([]);
+});

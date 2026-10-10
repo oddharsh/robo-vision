@@ -8,13 +8,13 @@ export {
 export { factsFromHtml } from "./facts-html.ts";
 export { checkPage, type CheckOptions, type Finding, type Report, type Severity } from "./check.ts";
 
-export { originMemory, mapStore, resolveRemembered, type OriginMemory, type Store, type PageEntry, type MemoryOptions } from "./memory.ts";
+export { originMemory, mapStore, resolveRemembered, type OriginMemory, type Store, type PageEntry, type MemoryOptions, type MapStoreOptions } from "./memory.ts";
 export { reroute, pageList, spellingChooser, exactFix, pagesFromLlmsTxt, parseSitemap, type Chooser, type Suggestion, type Rerouted, type RerouteOptions, type RerouteResult, type PageSource } from "./reroute.ts";
 
 import { resolveMachineCopy, type Attempt, type MachineCopy, type ResolveOptions } from "./source.ts";
 import { isMarkdownUrl } from "./params.ts";
 import { factsFromHtml } from "./facts-html.ts";
-import { originMemory, resolveRemembered, type OriginMemory } from "./memory.ts";
+import { originMemory, mapStore, resolveRemembered, type OriginMemory } from "./memory.ts";
 import { reroute as findPage, linksIn, type RerouteOptions, type Rerouted, type Suggestion } from "./reroute.ts";
 
 export interface Fetched {
@@ -35,15 +35,34 @@ export interface Fetched {
 }
 
 export interface FetchOptions extends Pick<ResolveOptions, "fetch" | "headers" | "cacheBust"> {
-  /** what this origin has shown before. Default: one memory for the process,
-   *  in a Map, believed for an hour. Pass originMemory(store) to keep it
-   *  elsewhere, or null to remember nothing */
+  /** what this origin has shown before. Default: one capped Map for the
+   *  process, believed for an hour, and kept apart per set of `headers`: a
+   *  caller with a cookie or a token never sees what another caller learned,
+   *  and never leaves it a "serves nothing" mark. Pass originMemory(store) to
+   *  keep it elsewhere (and scope it yourself if callers differ), or null to
+   *  remember nothing */
   memory?: OriginMemory | null;
   /** what to do on a 404; false returns the 404 alone */
   reroute?: RerouteOptions | false;
 }
 
-const shared = originMemory();
+const store = mapStore();
+const shared = originMemory(store);
+
+/**
+ * The default memory as seen with these headers. A caller's headers can change
+ * what an origin serves, so each header set keeps its own facts in the one
+ * store, under a hash of the set. A runtime with no Web Crypto (Node 18) gets
+ * a memory of its own for the call: nothing shared is safer than a weak hash.
+ */
+async function sharedFor(headers: Record<string, string> = {}): Promise<OriginMemory> {
+  const set = Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  if (!set.length) return shared;
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return originMemory();
+  const digest = new Uint8Array(await subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(set))));
+  return originMemory(store, { scope: [...digest].map((b) => b.toString(16).padStart(2, "0")).join("") });
+}
 
 /**
  * For an agent's fetch tool: the site's own Markdown when it publishes one,
@@ -59,7 +78,7 @@ const shared = originMemory();
  */
 export async function fetchMachineCopy(url: string, opts: FetchOptions = {}): Promise<Fetched> {
   const f = opts.fetch ?? globalThis.fetch.bind(globalThis);
-  const memory = opts.memory === undefined ? shared : opts.memory;
+  const memory = opts.memory === undefined ? await sharedFor(opts.headers) : opts.memory;
 
   // a 404, for a page or a file alike: an exact fix is followed, anything
   // fuzzier is suggested

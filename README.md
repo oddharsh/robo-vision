@@ -185,9 +185,12 @@ Workers.
 
 **It remembers each origin** for an hour, in a Map: the door that served last
 is asked first, and a section that served nothing is not asked again. A site
-that serves `.md` twins costs 2 requests a page after the first. Pass
-`memory: originMemory(store)` to keep it elsewhere (any `get`/`set` of strings),
-or `memory: null`.
+that serves `.md` twins costs 2 requests a page after the first. The Map holds
+10,000 entries and 16 million characters at most, dropping the least recently
+used. Each set of `headers` keeps its own facts, so a caller with a cookie
+never hands its private links to another caller's 404. Pass
+`memory: originMemory(store)` to keep it elsewhere (any `get`/`set` of strings;
+give each caller a `scope` if their headers differ), or `memory: null`.
 
 **On a 404 it reads the site's page list** and does one of two things:
 
