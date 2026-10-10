@@ -83,7 +83,13 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
   /** the most recent address that is a real page, for Human to return to from
    *  a Markdown-only file */
   let lastPage = document;
-  /** the render in flight, so a slow page cannot land over a newer one */
+  /** the latest navigation: a click, Back or Forward, a mode press. Anything
+   *  that resumes after an await checks it still holds the latest turn, so a
+   *  slow answer cannot land over a newer one, push an address over it, or
+   *  load a page in a mode the user has since left */
+  let turn = 0;
+  /** what the pane is loading, or last loaded: with `shown`, whether the
+   *  pane holds a finished copy or a loading state */
   let showing = "";
   /** what the pane holds now */
   let shown = "";
@@ -96,7 +102,7 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
     if (next !== history.current()) history.replace(next);
   };
 
-  async function present(url: string) {
+  async function present(url: string, t: number) {
     const key = keyOf(url);
     // already drawn, and nothing newer is loading over it. With a load in
     // flight the pane holds "loading", so even the page it last drew has to be
@@ -107,7 +113,7 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
     try {
       const c = await copies();
       const copy = key === document ? await c.forDocument() : await c.forUrl(via.get(key) ?? key);
-      if (showing !== key) return; // superseded by a newer navigation
+      if (t !== turn) return; // superseded by a newer navigation
       if (!copy) {
         // serves nothing we can fetch: load it for real, still in machine
         // mode, and let that page generate from its own DOM
@@ -117,7 +123,7 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
       shown = key;
       show({ kind: "copy", url: key, copy });
     } catch (e) {
-      if (showing !== key) return;
+      if (t !== turn) return;
       shown = "";
       show({ kind: "error", url: key, message: (e as Error).message });
     }
@@ -126,11 +132,13 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
   return {
     async start() {
       if (mode.get() !== "machine") return;
+      const t = ++turn;
       address("machine");
-      await present(here());
+      await present(here(), t);
     },
 
     async choose(m) {
+      const t = ++turn;
       if (m === "human" && here() !== document) {
         // a Markdown-only file has no human page: go back to the last real one
         const target = isMarkdownUrl(here()) ? lastPage : here();
@@ -143,18 +151,28 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
       // resolve BEFORE flipping: generation reads computed style, and once the
       // human region is display:none there is nothing visible left to read
       if (m === "machine") await copies().then((c) => c.forDocument()).catch(() => {});
+      // Human was pressed while that resolved: the later press wins
+      if (t !== turn) return;
       mode.set(m);
       address(m);
-      if (m === "machine") await present(here());
+      if (m === "machine") await present(here(), t);
     },
 
     async open(url) {
+      const t = ++turn;
       let target = keyOf(url);
       if (isMarkdownUrl(target)) {
+        // the check below is a round trip, so the pane says so now rather
+        // than sit on the old page inviting a second click
+        showing = target;
+        show({ kind: "loading", url: target });
         // fetch the file and, alongside, ask whether the page it mirrors
         // exists. Only a verified page goes in the address bar
         const c = await copies();
         const [page] = await Promise.all([c.pageBehind(target), c.forUrl(target)]);
+        // a newer click or Back moved on meanwhile: pushing now would draw
+        // this page over that one and wipe the forward stack
+        if (t !== turn) return;
         if (page) {
           via.set(page, target);
           target = page;
@@ -162,16 +180,17 @@ export function paneSession({ history, copies, mode, show }: SessionOptions): Pa
       }
       if (!isMarkdownUrl(target)) lastPage = target;
       history.push(withParam(target, "machine"));
-      await present(target);
+      await present(target, t);
     },
 
     async popstate() {
+      const t = ++turn;
       const url = new URL(history.current());
       const key = keyOf(url.href);
       if (!isMarkdownUrl(key)) lastPage = key;
       if (url.searchParams.get(PARAM) === "machine") {
         if (mode.get() !== "machine") mode.set("machine");
-        await present(key);
+        await present(key, t);
       } else if (key === document) {
         if (mode.get() !== "human") mode.set("human");
       } else {
