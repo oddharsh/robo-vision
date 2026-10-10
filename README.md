@@ -21,8 +21,10 @@ src/memory.ts       what an origin has shown: the door that worked, sections tha
 src/reroute.ts      a 404, and which of the origin's real pages it meant
 src/resolve.ts      the package's DOM-free entry, plus fetchMachineCopy() for agents
 src/cli.ts          robo-vision check <url>
-scripts/build.ts    dist/robo-vision.js (+ chunks/) lazy, dist/robo-vision.eager.js single file,
+scripts/build.ts    dist/robo-vision.js (+ chunks/, robo-vision.view.js) lazy,
+                    dist/robo-vision.eager.js single file, dist/prepaint.js,
                     dist/resolve.js and dist/cli.js for Node
+src/prepaint.ts     the snippet a host inlines in <head>
 demo/serve.ts       six server behaviours, one page       bun demo/serve.ts 8841
 dryrun/             drop robo-vision into 34 live sites in real Chrome
 test/               bun test (the generator tests drive real Chrome)
@@ -39,8 +41,66 @@ Host `dist/` at that path, or load it from a CDN that mirrors npm
 (`https://cdn.jsdelivr.net/npm/robo-vision@0.1/dist/robo-vision.js`). No markup, no inline script or style for a CSP to
 allow (styles are adopted as constructed sheets), no server changes.
 
-It brings no look of its own. The base follows the site's font and color
-scheme through system colors, and reads `--rv-bg`, `--rv-fg`, `--rv-accent`,
+A `<script src>` naming robo-vision means "put the toggle on this page", and
+a tag your own code injects counts the same. A site whose shell script decides
+which pages get the toggle imports it with no tag instead, and nothing mounts
+until it says so:
+
+```js
+const { mount } = await import("/robo-vision/robo-vision.js");
+mount({ corner: "top-right", labels: { machine: "Agent" } }); // resolves to { dock, pane }
+```
+
+Either way it mounts at once for a visitor who asked for machine view, and
+otherwise after the page's load event, when the main thread is idle. One dock
+per page: a second `mount()` resolves to `null` and the first one's options
+stand.
+
+### Hosting it across deploys
+
+Ship all of `dist/` together. Cache it like this:
+
+| file | cache | why |
+|---|---|---|
+| `robo-vision.js` | short (minutes) | a fixed name; a new release has to reach visitors |
+| `chunks/view-<hash>.js` | immutable | its name changes whenever its bytes do |
+| `robo-vision.view.js` | short | the same view under a fixed name |
+
+The fixed-name view is for the browser a deploy strands: it holds last
+release's entry, which asks for a view hash the deploy just deleted. The entry
+falls back to `robo-vision.view.js` when the hashed file is gone, and says so
+by name if that view is from a release it cannot drive. It sits beside the
+entry rather than in `chunks/`, so a host's immutable rule for `chunks/*` never
+catches it. (On Cloudflare, a second `_headers` rule under that glob would
+COMBINE with it into two `max-age` values rather than replace it.)
+
+### No flash of the page in machine view
+
+robo-vision is a module, and a module runs after the page has painted, so a
+link to `?robo-vision=machine` shows the human page for a moment before the
+pane covers it. `dist/prepaint.js` closes that gap. Inline its contents in
+`<head>` (the build prints the digest a hash-based CSP needs), or load it there
+as a classic script:
+
+```html
+<script>/* the contents of dist/prepaint.js, 530 bytes */</script>
+```
+
+It applies the requested mode to `<html>`, and for a machine view it hides the
+page until the pane is up, then both appear in the same frame. The hide is a
+CSSOM write, which a CSP that forbids inline styles still allows. If
+robo-vision never arrives on that page, the page shows anyway after 3 seconds,
+so inline it only where the toggle loads, and load the toggle at once (not on
+idle) when `<html data-robo-vision-mode="machine">` is set.
+
+### Its look is the site's
+
+It brings no look of its own. The dock and the pane wear the font `<body>`
+does; on a page whose `<body>` sits at the browser's default because the font
+is set on a wrapper inside it (bbc.com, nytimes.com), they get `system-ui`
+instead of Times. Only the family is inherited, so a light or italic body
+leaves the toggle regular and upright. Colours follow the site's color scheme
+through system colors, and the base reads `--rv-bg`, `--rv-fg`, `--rv-accent`,
 `--rv-accent-fg`, `--rv-border`, `--rv-radius`, `--rv-font`, `--rv-mono` and a
 few more from any ancestor, `:root` included. Labels, titles and the corner are
 attributes.

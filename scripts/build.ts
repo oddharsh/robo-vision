@@ -7,6 +7,11 @@
 //                                generator and the pane arrive from chunks/ on
 //                                first use, Speakeasy-style.
 //   dist/chunks/*.js             those, resolved relative to the entry's URL
+//   dist/robo-vision.view.js     the same view under a fixed name, which the
+//                                entry falls back to when a deploy has removed
+//                                the hash an old cached entry asks for
+//   dist/prepaint.js             the snippet that applies the mode before
+//                                first paint; inline its contents in <head>
 //   dist/robo-vision.eager.js    one classic script with everything inlined,
 //                                for a host that cannot serve module chunks
 //   dist/resolve.js (+ types/)   the resolver and the audit, no DOM: the
@@ -18,6 +23,8 @@
 // for robo-vision belongs in that site's stylesheet, not in this repository.
 
 import { mkdir, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { PREPAINT } from "../src/prepaint.ts";
 
 const root = new URL("..", import.meta.url).pathname;
 const dist = root + "dist/";
@@ -58,6 +65,10 @@ const viewBuild = await Bun.build({
 });
 if (!viewBuild.success) throw new AggregateError(viewBuild.logs, "view build failed");
 const viewFile = viewBuild.outputs[0].path.slice(dist.length); // chunks/view-<hash>.js
+// the same bytes under a fixed name: the view uses no import.meta, so it runs
+// the same from either address
+const VIEW_ALIAS = "robo-vision.view.js";
+await Bun.write(dist + VIEW_ALIAS, Bun.file(viewBuild.outputs[0].path));
 
 // the entry: the toggle, its state and base styles, and a runtime URL to the
 // view. splitting stays OFF, so there is no chunk graph for Bun to reshape
@@ -67,7 +78,7 @@ const lazy = await Bun.build({
   format: "esm",
   target: "browser",
   minify: true,
-  define: { ...define, __ROBO_VISION_VIEW__: JSON.stringify("./" + viewFile) },
+  define: { ...define, __ROBO_VISION_VIEW__: JSON.stringify("./" + viewFile), __ROBO_VISION_VIEW_ALIAS__: JSON.stringify("./" + VIEW_ALIAS) },
   naming: { entry: "robo-vision.js" },
 });
 if (!lazy.success) throw new AggregateError(lazy.logs, "lazy build failed");
@@ -77,10 +88,22 @@ const eager = await Bun.build({
   format: "iife",
   target: "browser",
   minify: true,
-  define,
+  // A classic script cannot contain import.meta at all: it is a SyntaxError
+  // at parse time, so the whole file dies before a line of it runs.
+  // mode-toggle.ts's default loader reaches its view by import.meta.url, and
+  // the drop-in always replaces that loader, so here it is dead code that
+  // still has to parse. b018a30 shipped it that way and the eager build was
+  // broken until the dry run tried to evaluate it on 2026-10-09.
+  define: { ...define, "import.meta.url": "document.baseURI" },
 });
 if (!eager.success) throw new AggregateError(eager.logs, "eager build failed");
 await Bun.write(dist + "robo-vision.eager.js", await eager.outputs[0].text());
+
+// the pre-paint snippet, as a file: a host inlines its contents in <head>, or
+// loads it there as a blocking classic script. A CSP that hashes inline
+// scripts needs the digest, so the build prints it.
+await Bun.write(dist + "prepaint.js", PREPAINT);
+const prepaintHash = createHash("sha256").update(PREPAINT, "utf8").digest("base64");
 
 // the half that needs no browser: a library entry and the CLI, for Node 18+
 const { version } = await Bun.file(root + "package.json").json();
@@ -103,5 +126,7 @@ const gz = async (p: string) => Bun.gzipSync(new Uint8Array(await Bun.file(p).ar
 const row = async (p: string) => `${p.replace(dist, "dist/").padEnd(42)} ${String(Bun.file(p).size).padStart(6)} B  ${String(await gz(p)).padStart(6)} B gz`;
 console.log(`css: ${css.length} B up front (base), ${paneCss.length} B with the view`);
 for (const o of [...lazy.outputs, ...viewBuild.outputs]) console.log(await row(o.path));
+console.log(await row(dist + VIEW_ALIAS));
 console.log(await row(dist + "robo-vision.eager.js"));
+console.log(`${await row(dist + "prepaint.js")}  CSP: 'sha256-${prepaintHash}'`);
 for (const o of [...lib.outputs, ...cli.outputs]) console.log(await row(o.path));

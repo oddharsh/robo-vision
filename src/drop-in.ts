@@ -28,6 +28,25 @@ export interface DropInOptions {
 
 export const MARK = "data-robo-vision";
 
+/** the family a page with no font of its own gets, in place of Times */
+const NO_FONT = "system-ui, sans-serif";
+
+/**
+ * Does <body> sit at the browser's default family? base.css inherits the
+ * page's font, and on bbc.com, nytimes.com and excalidraw.com the font is set
+ * on an inner wrapper, so <body> is Times. Compared against a probe set to
+ * `initial` rather than a list of names, because the default differs by
+ * engine and platform ("Times" in Chrome on macOS, "serif" in Firefox).
+ */
+function bodyHasNoFont(): boolean {
+  const probe = document.createElement("span");
+  probe.style.fontFamily = "initial";
+  document.body.append(probe);
+  const ua = getComputedStyle(probe).fontFamily;
+  probe.remove();
+  return getComputedStyle(document.body).fontFamily === ua;
+}
+
 export function dropIn(opts: DropInOptions): { dock: HTMLElement; pane: HTMLElement } | null {
   if (document.querySelector(`[${MARK}]`)) return null; // idempotent: one dock per page
 
@@ -52,6 +71,10 @@ export function dropIn(opts: DropInOptions): { dock: HTMLElement; pane: HTMLElem
   // straight away, and it has to be this loader that does it
   toggle.loadView = opts.loadView;
   dock.append(toggle);
+
+  // on our own two elements, never :root, so nothing of ours lands on the
+  // host's page; a site's --rv-font still outranks it, wherever it is set
+  if (bodyHasNoFont()) for (const el of [pane, dock]) el.style.setProperty("--rv-font-fallback", NO_FONT);
 
   // both go in the top layer where the browser has it (Chrome 114, Safari 17,
   // Firefox 125); elsewhere they fall back to the z-index in drop-in.css
