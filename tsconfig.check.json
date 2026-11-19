@@ -1,0 +1,19 @@
+{
+  // tsconfig.json emits dist/types for the `robo-vision/resolve` entry, so it
+  // lists only src/resolve.ts and the checker sees only what that file imports.
+  // This program is the one `bun run typecheck` checks: every source, test,
+  // script, and tool in the repository.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "emitDeclarationOnly": false,
+    "rootDir": ".",
+    "types": ["bun"],
+    // Bun runs every file as a module; the dryrun/ scripts import nothing, so
+    // without this tsc reads them as one shared global script
+    "moduleDetection": "force"
+  },
+  "files": [],
+  "include": ["src", "test", "scripts", "dryrun", "demo", "survey"]
+}
